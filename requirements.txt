@@ -1,5 +1,7 @@
 python-pptx>=0.6.21
-# PySimpleGUI is distributed via private index. Install with:
-#   pip install --extra-index-url https://PySimpleGUI.net/install PySimpleGUI
-PySimpleGUI>=4.60.4
+# PySimpleGUI is distributed via private index and requires Python < 3.14
+# Install with:
+#   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI
+# Note: PySimpleGUI is not compatible with Python 3.14 or later
+PySimpleGUI>=4.60.4,<6.0.0
 Pillow>=10.0.0

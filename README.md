@@ -87,16 +87,35 @@ A. PySimpleGUI のバージョンによってはテーマ機能が提供され�
 
 ## 開発者向け情報（必要な方のみ）
 
+### 動作要件
+
+- **Python**: 3.8 - 3.13 （Python 3.14 は現在非対応）
+- **OS**: Windows / macOS / Linux
+- **配布バイナリ**: Python 3.10 でビルドされています（内包済みのためPython不要）
+
 ### ローカル開発環境のセットアップ
 
 ```bash
+# Python 3.13 以下を使用してください / Please use Python 3.13 or earlier
+python --version
+
+# 仮想環境の作成 / Create virtual environment
 python -m venv .venv
 .venv\Scripts\activate         # Windows
 source .venv/bin/activate       # macOS / Linux
+
+# 依存関係のインストール / Install dependencies
 pip install -r requirements.txt
 ```
 
-> PySimpleGUI が見つからない場合は、`pip install --extra-index-url https://PySimpleGUI.net/install PySimpleGUI` を実行してください。
+> **重要**: PySimpleGUI はプライベート PyPI サーバーから配布されており、Python 3.14 とは互換性がありません。
+> 
+> **Important**: PySimpleGUI is distributed from a private PyPI server and is not compatible with Python 3.14.
+> 
+> PySimpleGUI のインストールに失敗する場合：
+> ```bash
+> pip install --index-url https://PySimpleGUI.net/install PySimpleGUI
+> ```
 
 ### アプリの起動
 

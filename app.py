@@ -12,12 +12,37 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
-import PySimpleGUI as _psg
+import sys
 from types import ModuleType
+
+# Check Python version compatibility for PySimpleGUI
+if sys.version_info >= (3, 14):
+    print("警告: PySimpleGUIはPython 3.14と互換性がない可能性があります。")
+    print("Warning: PySimpleGUI may not be compatible with Python 3.14.")
+    print("Python 3.13以下のバージョンを使用することを推奨します。")
+    print("Using Python 3.13 or earlier is recommended.")
+
+try:
+    import PySimpleGUI as _psg
+except Exception as e:
+    print(f"PySimpleGUIのインポートに失敗しました: {e}")
+    print(f"Failed to import PySimpleGUI: {e}")
+    print("")
+    print("解決策:")
+    print("Solutions:")
+    print("1. Python 3.13以下を使用する / Use Python 3.13 or earlier")
+    print("2. PySimpleGUIを正しくインストールする / Install PySimpleGUI correctly:")
+    print("   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI")
+    print("")
+    sys.exit(1)
 
 try:
     from PySimpleGUI import PySimpleGUI as _psg_alt
 except ImportError:
+    _psg_alt = None
+except Exception as e:
+    print(f"PySimpleGUI.PySimpleGUIのインポートに失敗しました: {e}")
+    print(f"Failed to import PySimpleGUI.PySimpleGUI: {e}")
     _psg_alt = None
 
 REQUIRED_SG_ATTRS = ("Text", "Input", "Button", "FileBrowse", "FolderBrowse", "Multiline", "Window")
@@ -66,6 +91,24 @@ for attr_name in REQUIRED_SG_ATTRS:
             setattr(sg, attr_name, getattr(_psg, attr_name))
         elif _psg_alt and hasattr(_psg_alt, attr_name):
             setattr(sg, attr_name, getattr(_psg_alt, attr_name))
+
+# Validate that all required attributes are available
+missing_attrs = [attr for attr in REQUIRED_SG_ATTRS if not hasattr(sg, attr)]
+if missing_attrs:
+    print(f"エラー: PySimpleGUIに必要な属性がありません: {missing_attrs}")
+    print(f"Error: Missing required PySimpleGUI attributes: {missing_attrs}")
+    print("")
+    print("これはPySimpleGUIのバージョン互換性の問題かもしれません。")
+    print("This may be a PySimpleGUI version compatibility issue.")
+    print("")
+    print("解決策:")
+    print("Solutions:")
+    print("1. Python 3.13以下を使用する / Use Python 3.13 or earlier")
+    print("2. PySimpleGUIを再インストールする / Reinstall PySimpleGUI:")
+    print("   pip uninstall PySimpleGUI -y")
+    print("   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI")
+    print("")
+    sys.exit(1)
 
 SG_EVENT_WINDOW_CLOSED = (
     getattr(sg, "WIN_CLOSED", None)
