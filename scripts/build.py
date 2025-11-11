@@ -62,6 +62,20 @@ def build_with_nuitka(target_dir: Path) -> None:
     run(base_cmd)
 
 
+def _find_macos_app(target_dir: Path) -> Path:
+    preferred = target_dir / f"{MAC_APP_NAME}.app"
+    if preferred.exists():
+        return preferred
+    candidates = sorted(target_dir.glob("**/*.app"))
+    if not candidates:
+        raise FileNotFoundError(preferred)
+    # Prefer bundle matching requested name if present among candidates
+    for candidate in candidates:
+        if candidate.name == f"{MAC_APP_NAME}.app":
+            return candidate
+    return candidates[0]
+
+
 def package_artifact(target_dir: Path) -> Path:
     system = platform.system()
     if system == "Windows":
@@ -71,11 +85,16 @@ def package_artifact(target_dir: Path) -> Path:
         archive_base = target_dir / f"{OUTPUT_BASENAME}-windows"
         archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=target_dir, base_dir=binary.name))
     elif system == "Darwin":
-        app_bundle = target_dir / f"{MAC_APP_NAME}.app"
-        if not app_bundle.exists():
-            raise FileNotFoundError(app_bundle)
+        app_bundle = _find_macos_app(target_dir)
         archive_base = target_dir / f"{OUTPUT_BASENAME}-macos"
-        archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=target_dir, base_dir=app_bundle.name))
+        archive_path = Path(
+            shutil.make_archive(
+                str(archive_base),
+                "zip",
+                root_dir=app_bundle.parent,
+                base_dir=app_bundle.name,
+            )
+        )
     else:
         binary = target_dir / OUTPUT_BASENAME
         if not binary.exists():
