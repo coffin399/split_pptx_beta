@@ -3,19 +3,21 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 import PySimpleGUI as sg
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_FILL
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Cm, Pt
 
@@ -33,6 +35,8 @@ TEXTBOX_POSITION = {
 }
 THUMBNAIL_WIDTH_CM = 8.0
 THUMBNAIL_MARGIN_CM = 0.5
+DEFAULT_THUMBNAIL_DPI = 150
+EMU_PER_INCH = 914400
 SPEAKER_PATTERN = re.compile(r"^\s*(話者\d+)[:：]\s*(.*)$")
 
 SPEAKER_COLORS = {
@@ -40,6 +44,18 @@ SPEAKER_COLORS = {
     "話者2": RGBColor(0x00, 0xFF, 0xFF),
     "話者3": RGBColor(0x00, 0xF9, 0x00),
 }
+
+FONT_PATH_CANDIDATES = [
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/meiryo.ttf",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/Library/Fonts/Osaka.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+
+_FONT_CACHE: dict[int, ImageFont.ImageFont] = {}
 
 
 @dataclass
@@ -132,6 +148,154 @@ def log(message: str, reporter: Optional[Callable[[str], None]]) -> None:
         reporter(message)
 
 
+def emu_to_px(value: int, dpi: int = DEFAULT_THUMBNAIL_DPI) -> int:
+    return max(1, int(round(value * dpi / EMU_PER_INCH)))
+
+
+def get_font(size_pt: float) -> ImageFont.ImageFont:
+    rounded = int(round(size_pt)) if size_pt else 20
+    if rounded in _FONT_CACHE:
+        return _FONT_CACHE[rounded]
+    for candidate in FONT_PATH_CANDIDATES:
+        if Path(candidate).exists():
+            try:
+                font = ImageFont.truetype(candidate, rounded)
+                _FONT_CACHE[rounded] = font
+                return font
+            except OSError:
+                continue
+    font = ImageFont.load_default()
+    _FONT_CACHE[rounded] = font
+    return font
+
+
+def rgb_color_tuple(color: Optional[RGBColor], default=(0, 0, 0)) -> tuple[int, int, int]:
+    if color is None:
+        return default
+    try:
+        return (color[0], color[1], color[2])
+    except (TypeError, IndexError):
+        return default
+
+
+def draw_text_block(
+    image: Image.Image,
+    shape,
+    dpi: int = DEFAULT_THUMBNAIL_DPI,
+) -> None:
+    if not shape.has_text_frame:
+        return
+    text_frame = shape.text_frame
+    raw_text = text_frame.text
+    if not raw_text.strip():
+        return
+    draw = ImageDraw.Draw(image)
+    left = emu_to_px(int(shape.left), dpi)
+    top = emu_to_px(int(shape.top), dpi)
+    width = emu_to_px(int(shape.width), dpi)
+
+    first_run = None
+    for paragraph in text_frame.paragraphs:
+        if paragraph.runs:
+            first_run = paragraph.runs[0]
+            break
+    font_size = (
+        first_run.font.size.pt
+        if first_run and first_run.font.size
+        else 24
+    )
+    color = rgb_color_tuple(first_run.font.color.rgb if first_run and first_run.font.color and first_run.font.color.rgb else None)
+    font = get_font(font_size)
+
+    lines: List[str] = []
+    for paragraph in raw_text.splitlines():
+        if not paragraph:
+            lines.append("")
+            continue
+        current = ""
+        for char in paragraph:
+            test = current + char
+            if draw.textlength(test, font=font) <= width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = char
+        if current:
+            lines.append(current)
+    line_height = font.getbbox("あ")[3] if hasattr(font, "getbbox") else font.size
+    y = top
+    for line in lines:
+        draw.text((left, y), line, font=font, fill=color)
+        y += line_height
+
+
+def draw_shape_fill(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+    fill = shape.fill
+    if not fill or fill.type != MSO_FILL.SOLID:
+        return
+    color = rgb_color_tuple(fill.fore_color.rgb if fill.fore_color.type is not None else None, default=(255, 255, 255))
+    left = emu_to_px(int(shape.left), dpi)
+    top = emu_to_px(int(shape.top), dpi)
+    width = emu_to_px(int(shape.width), dpi)
+    height = emu_to_px(int(shape.height), dpi)
+    ImageDraw.Draw(image).rectangle(
+        [left, top, left + width, top + height],
+        fill=color,
+    )
+
+
+def draw_picture(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+    if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
+        return
+    try:
+        blob = shape.image.blob
+    except Exception:
+        return
+    with Image.open(BytesIO(blob)) as pic:
+        pic = pic.convert("RGBA")
+        width = emu_to_px(int(shape.width), dpi)
+        height = emu_to_px(int(shape.height), dpi)
+        if width > 0 and height > 0:
+            pic = pic.resize((width, height), Image.LANCZOS)
+        left = emu_to_px(int(shape.left), dpi)
+        top = emu_to_px(int(shape.top), dpi)
+        image.paste(pic, (left, top), pic if pic.mode == "RGBA" else None)
+
+
+def slide_background_color(slide) -> tuple[int, int, int]:
+    fill = slide.background.fill
+    if fill and fill.type == MSO_FILL.SOLID:
+        return rgb_color_tuple(fill.fore_color.rgb if fill.fore_color and fill.fore_color.rgb else None, default=(255, 255, 255))
+    return (255, 255, 255)
+
+
+def render_slide_to_image(slide, slide_width: int, slide_height: int, output_path: Path, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+    width_px = emu_to_px(slide_width, dpi)
+    height_px = emu_to_px(slide_height, dpi)
+    background = slide_background_color(slide)
+    image = Image.new("RGB", (width_px, height_px), color=background)
+
+    for shape in slide.shapes:
+        try:
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                draw_picture(image, shape, dpi)
+            else:
+                draw_shape_fill(image, shape, dpi)
+        except Exception:
+            continue
+
+    for shape in slide.shapes:
+        try:
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                continue
+            draw_text_block(image, shape, dpi)
+        except Exception:
+            continue
+
+    image.save(output_path)
+
+
 def ensure_blank_presentation() -> Presentation:
     prs = Presentation()
     if prs.slides:
@@ -217,7 +381,7 @@ def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
     slide.shapes.add_picture(str(image_path), left, top, width=width, height=height)
 
 
-def create_placeholder_thumbnail(index: int, temp_dir: Path) -> Path:
+def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
     width, height = 1600, 900
     image = Image.new("RGB", (width, height), color=(30, 30, 30))
     draw = ImageDraw.Draw(image)
@@ -226,17 +390,24 @@ def create_placeholder_thumbnail(index: int, temp_dir: Path) -> Path:
     text_size = draw.textlength(text)  # type: ignore[attr-defined]
     if text_size:
         draw.text(((width - text_size) / 2, height / 2 - 20), text, fill=text_color)
-    placeholder_path = temp_dir / f"placeholder_slide_{index}.png"
+    placeholder_path = output_dir / f"placeholder_slide_{index}.png"
     image.save(placeholder_path)
     return placeholder_path
 
 
-def generate_thumbnails(pptx_path: Path, slide_count: int, reporter: Optional[Callable[[str], None]]) -> List[Optional[Path]]:
+def generate_thumbnails(
+    prs: Presentation,
+    pptx_path: Path,
+    reporter: Optional[Callable[[str], None]],
+) -> List[Optional[Path]]:
+    slide_count = len(prs.slides)
     thumbnails: List[Optional[Path]] = [None] * slide_count
-    with tempfile.TemporaryDirectory(prefix="pptx_thumbs_") as tmp_dir_str:
-        tmp_dir = Path(tmp_dir_str)
-        soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
-        if soffice:
+    persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
+
+    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
+    if soffice:
+        with tempfile.TemporaryDirectory(prefix="pptx_lo_") as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
             try:
                 subprocess.run(
                     [
@@ -255,33 +426,37 @@ def generate_thumbnails(pptx_path: Path, slide_count: int, reporter: Optional[Ca
                 png_files = sorted(tmp_dir.glob("*.png"))
                 if len(png_files) == slide_count:
                     for idx, path in enumerate(png_files):
-                        thumbnails[idx] = path
+                        dest = persistent_dir / f"slide_{idx + 1:03d}.png"
+                        shutil.copy2(path, dest)
+                        thumbnails[idx] = dest
                 else:
                     log(
-                        "LibreOffice で生成されたサムネイル数がスライド数と一致しません。プレースホルダーを使用します。",
+                        "LibreOffice で生成されたサムネイル数がスライド数と一致しません。内部レンダリングを使用します。",
                         reporter,
                     )
             except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-                log(f"サムネイル生成に失敗しました: {exc}. プレースホルダーを使用します。", reporter)
-        else:
+                log(f"サムネイル生成に失敗しました: {exc}. 内部レンダリングを使用します。", reporter)
+    else:
+        log(
+            "LibreOffice/soffice が見つかりません。内部レンダリングでサムネイルを生成します。",
+            reporter,
+        )
+
+    for idx, slide in enumerate(prs.slides, start=1):
+        if thumbnails[idx - 1] is not None:
+            continue
+        dest = persistent_dir / f"slide_{idx:03d}.png"
+        try:
+            render_slide_to_image(slide, prs.slide_width, prs.slide_height, dest)
+            thumbnails[idx - 1] = dest
+        except Exception as exc:
             log(
-                "LibreOffice/soffice が見つかりません。サムネイルはプレースホルダーで代替します。",
+                f"スライド {idx} のレンダリングに失敗しました: {exc}. プレースホルダーに切り替えます。",
                 reporter,
             )
-        for idx in range(slide_count):
-            if thumbnails[idx] is None:
-                thumbnails[idx] = create_placeholder_thumbnail(idx + 1, tmp_dir)
-        # Copy placeholder files to persistent temp so caller can use after context exit
-        persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_persist_"))
-        copied: List[Optional[Path]] = []
-        for path in thumbnails:
-            if path is None:
-                copied.append(None)
-                continue
-            new_path = persistent_dir / path.name
-            shutil.copy2(path, new_path)
-            copied.append(new_path)
-        return copied
+            thumbnails[idx - 1] = create_placeholder_thumbnail(idx, persistent_dir)
+
+    return thumbnails
 
 
 def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optional[Callable[[str], None]]) -> Path:
@@ -291,7 +466,7 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
     output_prs.slide_height = prs.slide_height
     blank_layout = output_prs.slide_layouts[6]
 
-    thumbnails = generate_thumbnails(input_file, len(prs.slides), reporter)
+    thumbnails = generate_thumbnails(prs, input_file, reporter)
 
     created = 0
     for slide_index, slide in enumerate(prs.slides, start=1):
