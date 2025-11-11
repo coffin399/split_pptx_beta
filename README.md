@@ -99,7 +99,7 @@ python app.py
 
 ### ビルド・リリースフロー
 
-- `master` ブランチに push すると GitHub Actions が自動的に Windows / macOS / Linux 用の Nuitka ビルドを実行します
+- `main` ブランチに push すると GitHub Actions が自動的に Windows / macOS / Linux 用の Nuitka ビルドを実行します
 - すべて成功した場合、既存の `latest` タグとリリースを削除したうえで最新の成果物で再作成します
 - ワークフロー定義は `.github/workflows/build-release.yml` にあります（手動実行も可能）
 
