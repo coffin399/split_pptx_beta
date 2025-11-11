@@ -48,6 +48,12 @@ python app.py
 - 話者ラベルは `話者1：テキスト` のように全角コロンまたは半角コロンで判定
 - 句読点が存在しない長文は 200 文字ごとに自動分割されます
 
+## CI/CD とリリース
+
+- `master` ブランチに push すると GitHub Actions が自動で macOS / Windows / Linux 向けに Nuitka ビルドを実行します
+- ビルドが全 OS で成功すると、既存の `latest` タグおよびリリースを削除し、新しい成果物で再作成します
+- ワークフローは `.github/workflows/build-release.yml` に定義されています（手動トリガーも可能）
+
 ## ライセンス
 
 MIT License
