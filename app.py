@@ -201,13 +201,13 @@ def draw_text_block(
     image: Image.Image,
     shape,
     dpi: int = DEFAULT_THUMBNAIL_DPI,
-) -> None:
+) -> bool:
     if not shape.has_text_frame:
-        return
+        return False
     text_frame = shape.text_frame
     raw_text = text_frame.text
     if not raw_text.strip():
-        return
+        return False
     draw = ImageDraw.Draw(image)
     left = emu_to_px(int(shape.left), dpi)
     top = emu_to_px(int(shape.top), dpi)
@@ -244,15 +244,20 @@ def draw_text_block(
             lines.append(current)
     line_height = font.getbbox("あ")[3] if hasattr(font, "getbbox") else font.size
     y = top
+    drew_text = False
     for line in lines:
         draw.text((left, y), line, font=font, fill=color)
         y += line_height
+        if line:
+            drew_text = True
+
+    return drew_text
 
 
-def draw_shape_fill(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+def draw_shape_fill(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> bool:
     fill = shape.fill
     if not fill or fill.type != MSO_FILL.SOLID:
-        return
+        return False
     color = rgb_color_tuple(fill.fore_color.rgb if fill.fore_color.type is not None else None, default=(255, 255, 255))
     left = emu_to_px(int(shape.left), dpi)
     top = emu_to_px(int(shape.top), dpi)
@@ -262,15 +267,16 @@ def draw_shape_fill(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI)
         [left, top, left + width, top + height],
         fill=color,
     )
+    return True
 
 
-def draw_picture(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+def draw_picture(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) -> bool:
     if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
-        return
+        return False
     try:
         blob = shape.image.blob
     except Exception:
-        return
+        return False
     with Image.open(BytesIO(blob)) as pic:
         pic = pic.convert("RGBA")
         width = emu_to_px(int(shape.width), dpi)
@@ -280,27 +286,61 @@ def draw_picture(image: Image.Image, shape, dpi: int = DEFAULT_THUMBNAIL_DPI) ->
         left = emu_to_px(int(shape.left), dpi)
         top = emu_to_px(int(shape.top), dpi)
         image.paste(pic, (left, top), pic if pic.mode == "RGBA" else None)
+    return True
 
 
 def slide_background_color(slide) -> tuple[int, int, int]:
     fill = slide.background.fill
     if fill and fill.type == MSO_FILL.SOLID:
         return rgb_color_tuple(fill.fore_color.rgb if fill.fore_color and fill.fore_color.rgb else None, default=(255, 255, 255))
-    return (255, 255, 255)
+    return (30, 30, 30)
 
 
-def render_slide_to_image(slide, slide_width: int, slide_height: int, output_path: Path, dpi: int = DEFAULT_THUMBNAIL_DPI) -> None:
+def _draw_placeholder_notice(image: Image.Image) -> None:
+    draw = ImageDraw.Draw(image)
+    overlay_color = (40, 40, 40)
+    draw.rectangle([(0, 0), (image.width, image.height)], fill=overlay_color)
+    title_font = get_font(48)
+    body_font = get_font(28)
+    lines = [
+        "サムネイルを内部描画しましたが",
+        "表示できる要素が見つかりませんでした",
+        "LibreOffice をインストールすると正確なプレビューが作成できます",
+    ]
+    current_y = image.height // 2 - (len(lines) * 50) // 2
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=body_font)
+        text_width = bbox[2] - bbox[0]
+        draw.text(
+            ((image.width - text_width) / 2, current_y),
+            line,
+            font=body_font,
+            fill=(220, 220, 220),
+        )
+        current_y += 50
+
+
+def render_slide_to_image(
+    slide,
+    slide_width: int,
+    slide_height: int,
+    output_path: Path,
+    dpi: int = DEFAULT_THUMBNAIL_DPI,
+) -> bool:
     width_px = emu_to_px(slide_width, dpi)
     height_px = emu_to_px(slide_height, dpi)
     background = slide_background_color(slide)
     image = Image.new("RGB", (width_px, height_px), color=background)
 
+    drawn_any = False
     for shape in slide.shapes:
         try:
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                draw_picture(image, shape, dpi)
+                if draw_picture(image, shape, dpi):
+                    drawn_any = True
             else:
-                draw_shape_fill(image, shape, dpi)
+                if draw_shape_fill(image, shape, dpi):
+                    drawn_any = True
         except Exception:
             continue
 
@@ -308,11 +348,16 @@ def render_slide_to_image(slide, slide_width: int, slide_height: int, output_pat
         try:
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 continue
-            draw_text_block(image, shape, dpi)
+            if draw_text_block(image, shape, dpi):
+                drawn_any = True
         except Exception:
             continue
 
+    if not drawn_any:
+        _draw_placeholder_notice(image)
+
     image.save(output_path)
+    return drawn_any
 
 
 def ensure_blank_presentation() -> Presentation:
@@ -404,11 +449,35 @@ def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
     width, height = 1600, 900
     image = Image.new("RGB", (width, height), color=(30, 30, 30))
     draw = ImageDraw.Draw(image)
-    text = f"Slide {index} preview"
-    text_color = (200, 200, 200)
-    text_size = draw.textlength(text)  # type: ignore[attr-defined]
-    if text_size:
-        draw.text(((width - text_size) / 2, height / 2 - 20), text, fill=text_color)
+    title = f"Slide {index}"
+    body_lines = [
+        "LibreOffice/soffice が見つからないため",
+        "サムネイルを簡易表示に切り替えました",
+        "フルプレビューを得るには LibreOffice をインストールしてください",
+    ]
+    title_font = get_font(56)
+    body_font = get_font(28)
+
+    title_bbox = draw.textbbox((0, 0), title, font=title_font)
+    title_width = title_bbox[2] - title_bbox[0]
+    draw.text(
+        ((width - title_width) / 2, height * 0.3),
+        title,
+        font=title_font,
+        fill=(240, 240, 240),
+    )
+
+    start_y = height * 0.5
+    line_spacing = 45
+    for idx, line in enumerate(body_lines):
+        bbox = draw.textbbox((0, 0), line, font=body_font)
+        text_width = bbox[2] - bbox[0]
+        draw.text(
+            ((width - text_width) / 2, start_y + idx * line_spacing),
+            line,
+            font=body_font,
+            fill=(200, 200, 200),
+        )
     placeholder_path = output_dir / f"placeholder_slide_{index}.png"
     image.save(placeholder_path)
     return placeholder_path
@@ -466,8 +535,15 @@ def generate_thumbnails(
             continue
         dest = persistent_dir / f"slide_{idx:03d}.png"
         try:
-            render_slide_to_image(slide, prs.slide_width, prs.slide_height, dest)
-            thumbnails[idx - 1] = dest
+            rendered = render_slide_to_image(slide, prs.slide_width, prs.slide_height, dest)
+            if rendered:
+                thumbnails[idx - 1] = dest
+            else:
+                log(
+                    f"スライド {idx}: 内部レンダリング結果に表示要素がありません。プレースホルダーに切り替えます。",
+                    reporter,
+                )
+                thumbnails[idx - 1] = create_placeholder_thumbnail(idx, persistent_dir)
         except Exception as exc:
             log(
                 f"スライド {idx} のレンダリングに失敗しました: {exc}. プレースホルダーに切り替えます。",
