@@ -27,7 +27,7 @@ PowerPoint の「ノート欄」に書かれた文字を、読み上げ用の大
    - macOS: `PPTXScriptSlides.app`
    - Linux: `pptx_script_slides`（ダブルクリックで起動できない場合は、右クリック→「権限」→「実行を許可」をオン）
 
-> **PySimpleGUI の入手について**: アプリをソースコードからセットアップする場合、PySimpleGUI は専用のリポジトリからインストールする必要があります。`pip install --extra-index-url https://PySimpleGUI.net/install PySimpleGUI` を使用してください。
+> **GUI について**: アプリは PySide6 (Qt for Python) を利用しています。ソースコードからセットアップする場合は `pip install PySide6` を実行してください。
 
 > **ヒント**: macOS の場合、初回起動時に「開発元が未確認」と表示されたら、システム設定 → プライバシーとセキュリティで「開く」を選択してください。
 
@@ -72,7 +72,7 @@ A. アプリは PowerPoint の内容をその場で描画してサムネイル�
 A. ログ欄に表示されるメッセージをご確認ください。それでも解決しない場合は、元の PowerPoint ファイルをコピーして別の場所に保存し直すか、PowerPoint を開いて保存し直してから再度お試しください。
 
 **Q. 画面の色が説明と違います。**  
-A. PySimpleGUI のバージョンによってはテーマ機能が提供されていない場合があります。その際は標準テーマに自動で切り替わるようになっています。
+A. PySide6 版では OS のテーマ設定に合わせた外観になります。表示が崩れる場合は最新のグラフィックドライバーを利用しているか確認し、改善しない場合はお知らせください。
 
 ---
 
@@ -91,7 +91,7 @@ A. PySimpleGUI のバージョンによってはテーマ機能が提供され�
 
 - **Python**: 3.8 - 3.13 （Python 3.14 は現在非対応）
 - **OS**: Windows / macOS / Linux
-- **配布バイナリ**: Python 3.10 でビルドされています（内包済みのためPython不要）
+- **配布バイナリ**: Python 3.10 + PySide6 でビルドされています（ランタイム内包済みで Python 不要）
 
 ### ローカル開発環境のセットアップ
 
@@ -108,13 +108,11 @@ source .venv/bin/activate       # macOS / Linux
 pip install -r requirements.txt
 ```
 
-> **重要**: PySimpleGUI はプライベート PyPI サーバーから配布されており、Python 3.14 とは互換性がありません。
+> **重要**: GUI は PySide6 (Qt) を使用しており、Python 3.14 ではテストしていません。Python 3.8〜3.13 の環境をご利用ください。
 > 
-> **Important**: PySimpleGUI is distributed from a private PyPI server and is not compatible with Python 3.14.
-> 
-> PySimpleGUI のインストールに失敗する場合：
+> **Important**: The GUI uses PySide6. Please install it via:
 > ```bash
-> pip install --index-url https://PySimpleGUI.net/install PySimpleGUI
+> pip install PySide6
 > ```
 
 ### アプリの起動

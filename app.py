@@ -13,109 +13,24 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 import sys
-from types import ModuleType
 
-# Check Python version compatibility for PySimpleGUI
-if sys.version_info >= (3, 14):
-    print("警告: PySimpleGUIはPython 3.14と互換性がない可能性があります。")
-    print("Warning: PySimpleGUI may not be compatible with Python 3.14.")
-    print("Python 3.13以下のバージョンを使用することを推奨します。")
-    print("Using Python 3.13 or earlier is recommended.")
-
-try:
-    import PySimpleGUI as _psg
-except Exception as e:
-    print(f"PySimpleGUIのインポートに失敗しました: {e}")
-    print(f"Failed to import PySimpleGUI: {e}")
-    print("")
-    print("解決策:")
-    print("Solutions:")
-    print("1. Python 3.13以下を使用する / Use Python 3.13 or earlier")
-    print("2. PySimpleGUIを正しくインストールする / Install PySimpleGUI correctly:")
-    print("   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI")
-    print("")
-    sys.exit(1)
-
-try:
-    from PySimpleGUI import PySimpleGUI as _psg_alt
-except ImportError:
-    _psg_alt = None
-except Exception as e:
-    print(f"PySimpleGUI.PySimpleGUIのインポートに失敗しました: {e}")
-    print(f"Failed to import PySimpleGUI.PySimpleGUI: {e}")
-    _psg_alt = None
-
-REQUIRED_SG_ATTRS = ("Text", "Input", "Button", "FileBrowse", "FolderBrowse", "Multiline", "Window")
-
-
-def _iter_modules(root: ModuleType) -> Iterable[ModuleType]:
-    stack = [root]
-    seen: set[int] = set()
-    while stack:
-        mod = stack.pop()
-        if not isinstance(mod, ModuleType):
-            continue
-        if id(mod) in seen:
-            continue
-        seen.add(id(mod))
-        yield mod
-        for attr_name in dir(mod):
-            if attr_name.startswith("_"):
-                continue
-            try:
-                attr = getattr(mod, attr_name)
-            except Exception:  # noqa: BLE001
-                continue
-            if isinstance(attr, ModuleType):
-                stack.append(attr)
-
-
-def _select_psg_module() -> ModuleType:
-    candidates = list(_iter_modules(_psg))
-    if _psg_alt:
-        candidates.extend(_iter_modules(_psg_alt))
-    for module in candidates:
-        if all(hasattr(module, attr) for attr in REQUIRED_SG_ATTRS):
-            return module
-    for module in candidates:
-        if hasattr(module, "Text") and hasattr(module, "Window"):
-            return module
-    return _psg
-
-
-sg = _select_psg_module()
-
-for attr_name in REQUIRED_SG_ATTRS:
-    if not hasattr(sg, attr_name):
-        if hasattr(_psg, attr_name):
-            setattr(sg, attr_name, getattr(_psg, attr_name))
-        elif _psg_alt and hasattr(_psg_alt, attr_name):
-            setattr(sg, attr_name, getattr(_psg_alt, attr_name))
-
-# Validate that all required attributes are available
-missing_attrs = [attr for attr in REQUIRED_SG_ATTRS if not hasattr(sg, attr)]
-if missing_attrs:
-    print(f"エラー: PySimpleGUIに必要な属性がありません: {missing_attrs}")
-    print(f"Error: Missing required PySimpleGUI attributes: {missing_attrs}")
-    print("")
-    print("これはPySimpleGUIのバージョン互換性の問題かもしれません。")
-    print("This may be a PySimpleGUI version compatibility issue.")
-    print("")
-    print("解決策:")
-    print("Solutions:")
-    print("1. Python 3.13以下を使用する / Use Python 3.13 or earlier")
-    print("2. PySimpleGUIを再インストールする / Reinstall PySimpleGUI:")
-    print("   pip uninstall PySimpleGUI -y")
-    print("   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI")
-    print("")
-    sys.exit(1)
-
-SG_EVENT_WINDOW_CLOSED = (
-    getattr(sg, "WIN_CLOSED", None)
-    or getattr(_psg, "WIN_CLOSED", None)
-    or getattr(sg, "WINDOW_CLOSED", None)
-    or getattr(_psg, "WINDOW_CLOSED", None)
-    or "__WINDOW_CLOSED__"
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QAction, QFont
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenuBar,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QTextEdit,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+    QHBoxLayout,
 )
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
@@ -603,69 +518,182 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
     return output_path
 
 
-def create_window() -> sg.Window:
-    if hasattr(sg, "theme"):
+class ConversionThread(QThread):
+    progress = Signal(str)
+    finished = Signal(bool, str)
+
+    def __init__(self, input_file: Path, output_dir: Path):
+        super().__init__()
+        self.input_file = input_file
+        self.output_dir = output_dir
+
+    def run(self) -> None:  # noqa: D401
         try:
-            sg.theme("DarkBlue3")
-        except Exception:
-            pass
-    elif hasattr(sg, "SetOptions"):
-        sg.SetOptions(
-            background_color="#0b1e3d",
-            text_color="white",
-            element_background_color="#ffffff",
-            input_elements_background_color="#ffffff",
-            button_color=("white", "#1f4b99"),
+            generate_script_slides(self.input_file, self.output_dir, self.progress.emit)
+            self.finished.emit(True, "処理が完了しました。")
+        except Exception as exc:  # pylint: disable=broad-except
+            self.finished.emit(False, f"エラーが発生しました: {exc}")
+
+
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("PPTX スクリプトスライド生成ツール")
+        self.resize(900, 600)
+
+        self.input_edit = QLineEdit()
+        self.input_edit.setPlaceholderText("変換するPowerPointファイル(.pptx)を選択")
+
+        input_button = QPushButton("参照…")
+        input_button.clicked.connect(self.choose_input_file)  # type: ignore[arg-type]
+
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("入力 PPTX"))
+        input_layout.addWidget(self.input_edit)
+        input_layout.addWidget(input_button)
+
+        self.output_edit = QLineEdit()
+        self.output_edit.setPlaceholderText("保存先フォルダ (未指定の場合は入力ファイルと同じフォルダ)")
+
+        output_button = QPushButton("参照…")
+        output_button.clicked.connect(self.choose_output_dir)  # type: ignore[arg-type]
+
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("出力フォルダ"))
+        output_layout.addWidget(self.output_edit)
+        output_layout.addWidget(output_button)
+
+        self.convert_button = QPushButton("変換")
+        self.convert_button.setDefault(True)
+        self.convert_button.clicked.connect(self.start_conversion)  # type: ignore[arg-type]
+
+        exit_button = QPushButton("終了")
+        exit_button.clicked.connect(self.close)  # type: ignore[arg-type]
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.convert_button)
+        button_layout.addWidget(exit_button)
+
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setPlaceholderText("ここに処理ログが表示されます")
+
+        central_widget = QWidget()
+        layout = QVBoxLayout(central_widget)
+        header_label = QLabel("PowerPointファイルを選んで変換してください。")
+        header_font = QFont()
+        header_font.setPointSize(12)
+        header_label.setFont(header_font)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(header_label)
+        layout.addLayout(input_layout)
+        layout.addLayout(output_layout)
+        layout.addLayout(button_layout)
+        layout.addWidget(self.log_view)
+
+        self.setCentralWidget(central_widget)
+
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        self.menu_bar = QMenuBar()
+        self.setMenuBar(self.menu_bar)
+
+        file_menu = self.menu_bar.addMenu("ファイル")
+        open_action = QAction("入力ファイルを開く", self)
+        open_action.triggered.connect(self.choose_input_file)  # type: ignore[arg-type]
+        file_menu.addAction(open_action)
+
+        output_action = QAction("出力フォルダを選択", self)
+        output_action.triggered.connect(self.choose_output_dir)  # type: ignore[arg-type]
+        file_menu.addAction(output_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("終了", self)
+        exit_action.triggered.connect(self.close)  # type: ignore[arg-type]
+        file_menu.addAction(exit_action)
+
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.addAction(open_action)
+        toolbar.addAction(output_action)
+        toolbar.addSeparator()
+        toolbar.addAction(exit_action)
+        self.addToolBar(toolbar)
+
+        self.worker: Optional[ConversionThread] = None
+
+    def append_log(self, message: str) -> None:
+        self.log_view.append(message)
+        self.log_view.ensureCursorVisible()
+
+    def choose_input_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "入力 PPTX を選択",
+            "",
+            "PowerPoint ファイル (*.pptx)",
         )
-    layout = [
-        [sg.Text("PowerPointファイルを選んで変換してください。")],
-        [
-            sg.Text("入力 PPTX", size=(12, 1)),
-            sg.Input(key="-INPUT-", enable_events=True),
-            sg.FileBrowse(file_types=(("PowerPoint", "*.pptx"),)),
-        ],
-        [
-            sg.Text("出力フォルダ", size=(12, 1)),
-            sg.Input(key="-OUTPUT-"),
-            sg.FolderBrowse(),
-        ],
-        [sg.Button("変換", key="-CONVERT-"), sg.Button("終了", key="-EXIT-")],
-        [sg.Multiline("", size=(80, 20), key="-LOG-", autoscroll=True, write_only=True)],
-    ]
-    return sg.Window("PPTX スクリプトスライド生成ツール", layout, finalize=True)
+        if file_path:
+            self.input_edit.setText(file_path)
+            if not self.output_edit.text():
+                self.output_edit.setText(str(Path(file_path).parent))
+
+    def choose_output_dir(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "出力フォルダを選択",
+            "",
+        )
+        if directory:
+            self.output_edit.setText(directory)
+
+    def start_conversion(self) -> None:
+        input_path = self.input_edit.text().strip()
+        if not input_path:
+            QMessageBox.warning(self, "入力ファイル", "入力ファイルを選択してください。")
+            return
+        input_file = Path(input_path)
+        if not input_file.exists():
+            QMessageBox.critical(self, "入力ファイル", "入力ファイルが見つかりません。")
+            return
+
+        output_path_value = self.output_edit.text().strip()
+        output_dir = Path(output_path_value) if output_path_value else input_file.parent
+
+        if not output_dir.exists():
+            try:
+                output_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                QMessageBox.critical(self, "出力フォルダ", f"出力フォルダを作成できません: {exc}")
+                return
+
+        self.log_view.clear()
+        self.append_log("変換を開始します...")
+        self.status_bar.showMessage("変換中...")
+        self.convert_button.setEnabled(False)
+
+        self.worker = ConversionThread(input_file, output_dir)
+        self.worker.progress.connect(self.append_log)
+        self.worker.finished.connect(self.finish_conversion)
+        self.worker.start()
+
+    def finish_conversion(self, success: bool, message: str) -> None:
+        self.append_log(message)
+        self.status_bar.showMessage(message, 5000)
+        self.convert_button.setEnabled(True)
+        QMessageBox.information(self, "結果", message if success else f"失敗: {message}")
+        self.worker = None
 
 
 def run_app() -> None:
-    window = create_window()
-
-    def reporter(message: str) -> None:
-        window["-LOG-"].print(message)
-
-    while True:
-        event, values = window.read()
-        if event in (sg.WIN_CLOSED, "-EXIT-"):
-            break
-        if event == "-CONVERT-":
-            input_path = values.get("-INPUT-")
-            if not input_path:
-                reporter("入力ファイルを選択してください。")
-                continue
-            input_file = Path(input_path)
-            if not input_file.exists():
-                reporter("入力ファイルが見つかりません。")
-                continue
-            output_path_value = values.get("-OUTPUT-")
-            output_dir = Path(output_path_value) if output_path_value else input_file.parent
-            window["-CONVERT-"].update(disabled=True)
-            window["-LOG-"].update("")
-            try:
-                generate_script_slides(input_file, output_dir, reporter)
-                reporter("処理が完了しました。")
-            except Exception as exc:  # pylint: disable=broad-except
-                reporter(f"エラーが発生しました: {exc}")
-            finally:
-                window["-CONVERT-"].update(disabled=False)
-    window.close()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

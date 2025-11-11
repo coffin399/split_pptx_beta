@@ -1,7 +1,7 @@
 python-pptx>=0.6.21
-# PySimpleGUI is distributed via private index and requires Python < 3.14
+# PySide6 provides the Qt based GUI (compatible with Python 3.7+)
 # Install with:
-#   pip install --index-url https://PySimpleGUI.net/install PySimpleGUI
-# Note: PySimpleGUI is not compatible with Python 3.14 or later
-PySimpleGUI>=4.60.4,<6.0.0
+#   pip install PySide6
+# We target Python 3.10 in builds, but local dev can use 3.8-3.13
+PySide6>=6.6.0,<6.8
 Pillow>=10.0.0
