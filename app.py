@@ -12,7 +12,18 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
-import PySimpleGUI as sg
+import PySimpleGUI as _psg
+try:
+    from PySimpleGUI import PySimpleGUI as _psg_alt
+except ImportError:
+    _psg_alt = None
+
+if hasattr(_psg, "Text"):
+    sg = _psg  # type: ignore[assignment]
+elif _psg_alt and hasattr(_psg_alt, "Text"):
+    sg = _psg_alt  # type: ignore[assignment]
+else:  # Fallback to original module even if attributes missing
+    sg = _psg  # type: ignore[assignment]
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
