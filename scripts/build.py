@@ -10,8 +10,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pptx
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_ENTRY = PROJECT_ROOT / "app.py"
+# Ensure python-pptx template assets are bundled
+PPTX_PACKAGE_DIR = Path(pptx.__file__).resolve().parent
+PPTX_TEMPLATE_DIR = PPTX_PACKAGE_DIR / "templates"
 # Ensure dist directory exists ahead of builds
 DIST_ROOT = PROJECT_ROOT / "dist"
 DIST_ROOT.mkdir(exist_ok=True)
@@ -38,6 +43,14 @@ def build_with_nuitka(target_dir: Path) -> None:
         "--follow-imports",
         "--assume-yes-for-downloads",
     ]
+    # Include python-pptx templates (default.pptx etc.) so bundled apps can locate them
+    base_cmd.append("--include-package-data=pptx")
+    if PPTX_TEMPLATE_DIR.exists():
+        base_cmd.append(f"--include-data-dir={PPTX_TEMPLATE_DIR}=pptx/templates")
+        for template_file in PPTX_TEMPLATE_DIR.glob("*.pptx"):
+            base_cmd.append(
+                f"--include-data-file={template_file}=pptx/templates/{template_file.name}"
+            )
     if system == "Windows":
         base_cmd.extend(
             [
