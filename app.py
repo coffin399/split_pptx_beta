@@ -500,7 +500,19 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
 
 
 def create_window() -> sg.Window:
-    sg.theme("DarkBlue3")
+    if hasattr(sg, "theme"):
+        try:
+            sg.theme("DarkBlue3")
+        except Exception:
+            pass
+    elif hasattr(sg, "SetOptions"):
+        sg.SetOptions(
+            background_color="#0b1e3d",
+            text_color="white",
+            element_background_color="#ffffff",
+            input_elements_background_color="#ffffff",
+            button_color=("white", "#1f4b99"),
+        )
     layout = [
         [sg.Text("PowerPointファイルを選んで変換してください。")],
         [
