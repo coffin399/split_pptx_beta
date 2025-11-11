@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
         python-version: ["3.10"]
     runs-on: ${{ matrix.os }}
 
@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --extra-index-url https://PySimpleGUI.net/install -r requirements.txt nuitka
+          pip install -r requirements.txt nuitka
 
       - name: Build distributable
         id: build
@@ -96,7 +96,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/**/*.zip
+          files: |
+            dist/**/*.zip
+            dist/**/*.exe
           tag_name: ${{ env.RELEASE_TAG }}
           name: Latest Release
           draft: false

@@ -18,14 +18,12 @@ PowerPoint の「ノート欄」に書かれた文字を、読み上げ用の大
 ## はじめに（アプリの準備）
 
 1. GitHub の「Releases」ページからお使いのパソコンに合ったファイルをダウンロードします。
-   - Windows: `pptx_script_slides-windows.zip`
+   - Windows: `pptx_script_slides.exe`
    - macOS: `pptx_script_slides-macos.zip`
-   - Linux: `pptx_script_slides-linux.zip`
 2. ダウンロードした ZIP ファイルをダブルクリックして解凍します。
 3. 解凍してできたフォルダの中にあるアプリを使います。
    - Windows: `pptx_script_slides.exe`
    - macOS: `PPTXScriptSlides.app`
-   - Linux: `pptx_script_slides`（ダブルクリックで起動できない場合は、右クリック→「権限」→「実行を許可」をオン）
 
 > **GUI について**: アプリは PySide6 (Qt for Python) を利用しています。ソースコードからセットアップする場合は `pip install PySide6` を実行してください。
 
@@ -90,7 +88,7 @@ A. PySide6 版では OS のテーマ設定に合わせた外観になります�
 ### 動作要件
 
 - **Python**: 3.8 - 3.13 （Python 3.14 は現在非対応）
-- **OS**: Windows / macOS / Linux
+- **OS**: Windows / macOS
 - **配布バイナリ**: Python 3.10 + PySide6 でビルドされています（ランタイム内包済みで Python 不要）
 
 ### ローカル開発環境のセットアップ
@@ -102,7 +100,7 @@ python --version
 # 仮想環境の作成 / Create virtual environment
 python -m venv .venv
 .venv\Scripts\activate         # Windows
-source .venv/bin/activate       # macOS / Linux
+source .venv/bin/activate       # macOS
 
 # 依存関係のインストール / Install dependencies
 pip install -r requirements.txt
@@ -110,10 +108,7 @@ pip install -r requirements.txt
 
 > **重要**: GUI は PySide6 (Qt) を使用しており、Python 3.14 ではテストしていません。Python 3.8〜3.13 の環境をご利用ください。
 > 
-> **Important**: The GUI uses PySide6. Please install it via:
-> ```bash
-> pip install PySide6
-> ```
+> **サムネイルについて**: Windows では PowerPoint + pywin32、macOS では PowerPoint + osascript を利用できる場合に自動で実スライド画像を取得します。インストールされていない環境では内部レンダリングまたはプレースホルダーにフォールバックします。
 
 ### アプリの起動
 
@@ -123,7 +118,7 @@ python app.py
 
 ### ビルド・リリースフロー
 
-- `main` ブランチに push すると GitHub Actions が自動的に Windows / macOS / Linux 用の Nuitka ビルドを実行します
+- `main` ブランチに push すると GitHub Actions が自動的に Windows / macOS 向けに Nuitka ビルドを実行します
 - すべて成功した場合、既存の `latest` タグとリリースを削除したうえで最新の成果物で再作成します
 - ワークフロー定義は `.github/workflows/build-release.yml` にあります（手動実行も可能）
 

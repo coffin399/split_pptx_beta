@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import platform
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -492,6 +493,91 @@ def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
     return placeholder_path
 
 
+def _normalize_powerpoint_export(png_dir: Path) -> List[Path]:
+    results: List[Path] = []
+    if not png_dir.exists():
+        return results
+    for pattern in ("Slide*.PNG", "Slide*.png"):
+        results.extend(sorted(png_dir.glob(pattern)))
+    return sorted(results)
+
+
+def _export_with_powerpoint_windows(
+    pptx_path: Path,
+    destination: Path,
+    reporter: Optional[Callable[[str], None]],
+) -> List[Path]:
+    try:
+        import win32com.client  # type: ignore[import]
+    except ImportError:
+        log("PowerPoint連携には pywin32 が必要です。'pip install pywin32' を実行してください。", reporter)
+        return []
+
+    try:
+        powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+    except Exception as exc:  # noqa: BLE001
+        log(f"PowerPoint の起動に失敗しました: {exc}", reporter)
+        return []
+
+    destination.mkdir(parents=True, exist_ok=True)
+    presentation = None
+    exported: List[Path] = []
+    try:
+        presentation = powerpoint.Presentations.Open(str(pptx_path), WithWindow=False)
+        presentation.Export(str(destination), "PNG")
+        exported = _normalize_powerpoint_export(destination)
+    except Exception as exc:  # noqa: BLE001
+        log(f"PowerPoint からのサムネイル書き出しに失敗しました: {exc}", reporter)
+    finally:
+        if presentation is not None:
+            try:
+                presentation.Close()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            powerpoint.Quit()
+        except Exception:  # noqa: BLE001
+            pass
+    return exported
+
+
+def _export_with_powerpoint_macos(
+    pptx_path: Path,
+    destination: Path,
+    reporter: Optional[Callable[[str], None]],
+) -> List[Path]:
+    destination.mkdir(parents=True, exist_ok=True)
+    pptx_posix = pptx_path.as_posix().replace("\"", "\\\"")
+    dest_posix = destination.as_posix().replace("\"", "\\\"")
+    applescript = f'''
+        tell application "Microsoft PowerPoint"
+            activate
+            set thePresentation to open POSIX file "{pptx_posix}" with read only
+            export thePresentation to POSIX path "{dest_posix}" as save as PNG
+            close thePresentation saving no
+        end tell
+    '''
+    try:
+        subprocess.run([
+            "osascript",
+            "-e",
+            applescript,
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except FileNotFoundError:
+        log("osascript コマンドが見つかりませんでした。macOS でのみ利用できます。", reporter)
+        return []
+    except subprocess.CalledProcessError as exc:
+        log(
+            f"PowerPoint (macOS) からのサムネイル書き出しに失敗しました: {exc.stderr.decode(errors='ignore').strip()}",
+            reporter,
+        )
+        return []
+    exported = _normalize_powerpoint_export(destination)
+    if not exported:
+        log("PowerPoint から書き出された PNG が見つかりませんでした。", reporter)
+    return exported
+
+
 def generate_thumbnails(
     prs: Presentation,
     pptx_path: Path,
@@ -500,6 +586,27 @@ def generate_thumbnails(
     slide_count = len(prs.slides)
     thumbnails: List[Optional[Path]] = [None] * slide_count
     persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
+
+    system = platform.system()
+    external_dir = persistent_dir / "external"
+    external_exports: List[Path] = []
+    if system == "Windows":
+        external_exports = _export_with_powerpoint_windows(pptx_path, external_dir, reporter)
+    elif system == "Darwin":
+        external_exports = _export_with_powerpoint_macos(pptx_path, external_dir, reporter)
+
+    if external_exports:
+        if len(external_exports) == slide_count:
+            log("PowerPoint を使用してサムネイルを取得しました。", reporter)
+            for idx, path in enumerate(external_exports):
+                dest = persistent_dir / f"slide_{idx + 1:03d}.png"
+                shutil.copy2(path, dest)
+                thumbnails[idx] = dest
+        else:
+            log(
+                "PowerPoint から取得したサムネイル数がスライド数と一致しません。内部レンダリングにフォールバックします。",
+                reporter,
+            )
 
     soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
     if soffice:

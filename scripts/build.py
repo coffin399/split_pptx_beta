@@ -83,8 +83,7 @@ def package_artifact(target_dir: Path) -> Path:
         binary = target_dir / f"{OUTPUT_BASENAME}.exe"
         if not binary.exists():
             raise FileNotFoundError(binary)
-        archive_base = target_dir / f"{OUTPUT_BASENAME}-windows"
-        archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=target_dir, base_dir=binary.name))
+        return binary
     elif system == "Darwin":
         app_bundle = _find_macos_app(target_dir)
         archive_base = target_dir / f"{OUTPUT_BASENAME}-macos"
@@ -96,13 +95,12 @@ def package_artifact(target_dir: Path) -> Path:
                 base_dir=app_bundle.name,
             )
         )
+        return archive_path
     else:
         binary = target_dir / OUTPUT_BASENAME
         if not binary.exists():
             raise FileNotFoundError(binary)
-        archive_base = target_dir / f"{OUTPUT_BASENAME}-linux"
-        archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=target_dir, base_dir=binary.name))
-    return archive_path
+        return binary
 
 
 def main() -> None:
