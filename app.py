@@ -13,17 +13,67 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 import PySimpleGUI as _psg
+from types import ModuleType
+
 try:
     from PySimpleGUI import PySimpleGUI as _psg_alt
 except ImportError:
     _psg_alt = None
 
-if hasattr(_psg, "Text"):
-    sg = _psg  # type: ignore[assignment]
-elif _psg_alt and hasattr(_psg_alt, "Text"):
-    sg = _psg_alt  # type: ignore[assignment]
-else:  # Fallback to original module even if attributes missing
-    sg = _psg  # type: ignore[assignment]
+REQUIRED_SG_ATTRS = ("Text", "Input", "Button", "FileBrowse", "FolderBrowse", "Multiline", "Window")
+
+
+def _iter_modules(root: ModuleType) -> Iterable[ModuleType]:
+    stack = [root]
+    seen: set[int] = set()
+    while stack:
+        mod = stack.pop()
+        if not isinstance(mod, ModuleType):
+            continue
+        if id(mod) in seen:
+            continue
+        seen.add(id(mod))
+        yield mod
+        for attr_name in dir(mod):
+            if attr_name.startswith("_"):
+                continue
+            try:
+                attr = getattr(mod, attr_name)
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(attr, ModuleType):
+                stack.append(attr)
+
+
+def _select_psg_module() -> ModuleType:
+    candidates = list(_iter_modules(_psg))
+    if _psg_alt:
+        candidates.extend(_iter_modules(_psg_alt))
+    for module in candidates:
+        if all(hasattr(module, attr) for attr in REQUIRED_SG_ATTRS):
+            return module
+    for module in candidates:
+        if hasattr(module, "Text") and hasattr(module, "Window"):
+            return module
+    return _psg
+
+
+sg = _select_psg_module()
+
+for attr_name in REQUIRED_SG_ATTRS:
+    if not hasattr(sg, attr_name):
+        if hasattr(_psg, attr_name):
+            setattr(sg, attr_name, getattr(_psg, attr_name))
+        elif _psg_alt and hasattr(_psg_alt, attr_name):
+            setattr(sg, attr_name, getattr(_psg_alt, attr_name))
+
+SG_EVENT_WINDOW_CLOSED = (
+    getattr(sg, "WIN_CLOSED", None)
+    or getattr(_psg, "WIN_CLOSED", None)
+    or getattr(sg, "WINDOW_CLOSED", None)
+    or getattr(_psg, "WINDOW_CLOSED", None)
+    or "__WINDOW_CLOSED__"
+)
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
