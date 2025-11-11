@@ -205,18 +205,29 @@ def draw_text_block(
     if not shape.has_text_frame:
         return False
     text_frame = shape.text_frame
-    raw_text = text_frame.text
-    if not raw_text.strip():
-        return False
     draw = ImageDraw.Draw(image)
     left = emu_to_px(int(shape.left), dpi)
     top = emu_to_px(int(shape.top), dpi)
     width = emu_to_px(int(shape.width), dpi)
 
-    first_run = None
+    paragraphs: List[str] = []
     for paragraph in text_frame.paragraphs:
         if paragraph.runs:
-            first_run = paragraph.runs[0]
+            text = "".join(run.text for run in paragraph.runs)
+        else:
+            text = paragraph.text or ""
+        paragraphs.append(text)
+
+    if not any(p.strip() for p in paragraphs):
+        return False
+
+    first_run = None
+    for paragraph in text_frame.paragraphs:
+        for run in paragraph.runs:
+            if run.text and run.text.strip():
+                first_run = run
+                break
+        if first_run:
             break
     font_size = (
         first_run.font.size.pt
@@ -227,21 +238,19 @@ def draw_text_block(
     font = get_font(font_size)
 
     lines: List[str] = []
-    for paragraph in raw_text.splitlines():
-        if not paragraph:
+    for paragraph_text in paragraphs:
+        if not paragraph_text:
             lines.append("")
             continue
         current = ""
-        for char in paragraph:
+        for char in paragraph_text:
             test = current + char
-            if draw.textlength(test, font=font) <= width:
+            if draw.textlength(test, font=font) <= width or not current:
                 current = test
             else:
-                if current:
-                    lines.append(current)
+                lines.append(current)
                 current = char
-        if current:
-            lines.append(current)
+        lines.append(current)
     line_height = font.getbbox("あ")[3] if hasattr(font, "getbbox") else font.size
     y = top
     drew_text = False
