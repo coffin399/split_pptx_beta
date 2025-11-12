@@ -753,18 +753,22 @@ def _export_thumbnails_via_pdf(
     persistent_dir: Path,
     reporter: Optional[Callable[[str], None]],
 ) -> List[Path]:
-    """Generate thumbnails by converting PPTX -> PDF -> PNG."""
-    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
-    if not soffice:
-        log(
-            "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成をスキップします。",
-            reporter,
+    """Export thumbnails via PDF conversion with memory-optimized DPI."""
+    pdf_workspace = persistent_dir / "pdf_workspace"
     pdf_workspace.mkdir(parents=True, exist_ok=True)
     pdf_path = pdf_workspace / pptx_path.with_suffix(".pdf").name
 
     # Use optimal DPI based on slide count
     optimal_dpi = get_optimal_dpi(slide_count)
     log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (メモリ最適化)", reporter)
+
+    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
+    if not soffice:
+        log(
+            "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成をスキップします。",
+            reporter,
+        )
+        return []
 
     try:
         env = os.environ.copy()
@@ -787,7 +791,7 @@ def _export_thumbnails_via_pdf(
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         log(
-            "LibreOffice での PDF 変換に失敗しました: {exc}. 別の方法にフォールバックします。",
+            f"LibreOffice での PDF 変換に失敗しました: {exc}. 別の方法にフォールバックします。",
             reporter,
         )
         return []
