@@ -165,14 +165,18 @@ async def process_conversion(
             log_callback
         )
         
-        # Copy result to expected output path
-        shutil.copy2(result_path, output_path)
+        # Use the result path directly if it's already the expected output path
+        final_path = result_path
+        if result_path != output_path:
+            # Copy result to expected output path only if different
+            shutil.copy2(result_path, output_path)
+            final_path = output_path
         
         # Update status
         task_status[task_id].update({
             "status": "completed",
             "message": "Conversion completed successfully!",
-            "file_path": str(output_path),
+            "file_path": str(final_path),
             "download_url": f"/download/{task_id}"
         })
         
