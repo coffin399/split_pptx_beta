@@ -103,9 +103,9 @@ def auto_cleanup_if_needed() -> None:
         
         last_cleanup = current_time
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Serve the main web interface."""
+    """Serve the main web interface (HEAD returns headers only)."""
     return FileResponse("static/index.html")
 
 @app.get("/health")
