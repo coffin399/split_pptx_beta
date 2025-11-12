@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Documentation
+README.md
+*.md
+
+# Scripts (except web app)
+scripts/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Logs
+*.log
+
+# Test files
+test_*
+*_test.py
+
+# Development files
+.env.local
+.env.development

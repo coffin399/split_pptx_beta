@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
-import platform
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
-
-import sys
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QFont
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
 )
 from PIL import Image, ImageDraw, ImageFont
+from pdf2image import convert_from_path
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_FILL
@@ -50,7 +51,7 @@ DEFAULT_FONT_COLOR = RGBColor(0xFF, 0xFF, 0xFF)
 TEXTBOX_POSITION = {
     "left": Cm(0.79),
     "top": Cm(0.8),
-    "width": Cm(32.31),
+    "width": Cm(22.0),  # Reduced to avoid overlap with thumbnail
     "height": Cm(15.6),
 }
 THUMBNAIL_WIDTH_CM = 8.0
@@ -88,7 +89,8 @@ class Segment:
 
 def segment_line(text: str, max_chars: int) -> List[str]:
     """Split a line into punctuation-aware segments within the max length."""
-    pattern = re.compile(r"[^。、，,.！？!?]+[。、，,.！？!?]?")
+    # More comprehensive punctuation pattern for better line breaks
+    pattern = re.compile(r"[^。、，,.！？!?；;：:]+[。、，,.！？!?；;：:]?")
     segments: List[str] = []
     for token in pattern.findall(text):
         trimmed = token.strip()
@@ -97,8 +99,23 @@ def segment_line(text: str, max_chars: int) -> List[str]:
         if len(trimmed) <= max_chars:
             segments.append(trimmed)
         else:
-            for start in range(0, len(trimmed), max_chars):
-                segments.append(trimmed[start : start + max_chars])
+            # For long segments, try to break at natural points
+            break_patterns = [
+                re.compile(r"(.{1,80}[、,，])(.+)"),
+                re.compile(r"(.{1,120}[。.！？!?])(.+)"),
+                re.compile(r"(.{1,60}[^a-zA-Z0-9]{1,2})(.+)"),
+            ]
+            broken = False
+            for break_pattern in break_patterns:
+                match = break_pattern.match(trimmed)
+                if match:
+                    segments.extend([part.strip() for part in match.groups() if part.strip()])
+                    broken = True
+                    break
+            if not broken:
+                # Fallback: break at max_chars
+                for start in range(0, len(trimmed), max_chars):
+                    segments.append(trimmed[start : start + max_chars])
     if not segments and text:
         # Fallback when regex fails (e.g., single punctuation)
         for start in range(0, len(text), max_chars):
@@ -395,35 +412,37 @@ def add_textbox(slide, chunk: List[Segment]) -> None:
     text_frame = textbox.text_frame
     text_frame.text = ""
     text_frame.word_wrap = True
-    text_frame.auto_size = MSO_AUTO_SIZE.NONE
+    text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE  # Auto-fit text to shape
     text_frame.vertical_anchor = MSO_ANCHOR.TOP
-    text_frame.margin_bottom = Pt(0)
-    text_frame.margin_top = Pt(0)
-    text_frame.margin_left = Pt(0)
-    text_frame.margin_right = Pt(0)
+    text_frame.margin_bottom = Pt(8)
+    text_frame.margin_top = Pt(8)
+    text_frame.margin_left = Pt(8)
+    text_frame.margin_right = Pt(8)
 
     for idx, segment in enumerate(chunk):
         paragraph = text_frame.paragraphs[0] if idx == 0 else text_frame.add_paragraph()
         paragraph.text = segment.text
         paragraph.alignment = PP_ALIGN.LEFT
-        paragraph.space_after = Pt(0)
+        paragraph.space_after = Pt(12)  # Add spacing between paragraphs
         paragraph.space_before = Pt(0)
         font = paragraph.font
         font.name = FONT_NAME
         font.size = Pt(FONT_SIZE_PT)
-        font.bold = False
+        font.bold = True
         font.color.rgb = speaker_color(segment.speaker)
 
 
 def add_page_indicator(slide, index: int, total: int, slide_width, slide_height) -> None:
     if total <= 1:
         return
-    margin = Cm(THUMBNAIL_MARGIN_CM)
+    # Position page indicator above thumbnail
+    margin = Cm(0.1)
+    thumbnail_height = Cm(THUMBNAIL_WIDTH_CM * 9/16)  # Assuming 16:9 aspect ratio
     indicator_width = Cm(4)
     indicator_height = Cm(1.5)
     textbox = slide.shapes.add_textbox(
         slide_width - indicator_width - margin,
-        slide_height - indicator_height - margin,
+        slide_height - thumbnail_height - indicator_height - Cm(0.5),
         indicator_width,
         indicator_height,
     )
@@ -437,19 +456,20 @@ def add_page_indicator(slide, index: int, total: int, slide_width, slide_height)
     font = paragraph.font
     font.name = FONT_NAME
     font.size = Pt(FONT_SIZE_PT)
-    font.bold = False
+    font.bold = True
     font.color.rgb = PAGE_INDICATOR_COLOR
 
 
 def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
     if not image_path.exists():
         return
-    margin = Cm(THUMBNAIL_MARGIN_CM)
+    margin = Cm(0.1)  # Minimal margin for tight positioning
     with Image.open(image_path) as img:
         width_cm = THUMBNAIL_WIDTH_CM
         height_cm = width_cm * img.height / img.width
     width = Cm(width_cm)
     height = Cm(height_cm)
+    # Position thumbnail exactly at bottom-right corner
     left = slide_width - width - margin
     top = slide_height - height - margin
     slide.shapes.add_picture(str(image_path), left, top, width=width, height=height)
@@ -459,7 +479,7 @@ def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
     width, height = 1600, 900
     image = Image.new("RGB", (width, height), color=(30, 30, 30))
     draw = ImageDraw.Draw(image)
-    title = f"Slide {index}"
+    title = f"スライド {index}"
     body_lines = [
         "LibreOffice/soffice が見つからないため",
         "サムネイルを簡易表示に切り替えました",
@@ -549,33 +569,136 @@ def _export_with_powerpoint_macos(
     destination.mkdir(parents=True, exist_ok=True)
     pptx_posix = pptx_path.as_posix().replace("\"", "\\\"")
     dest_posix = destination.as_posix().replace("\"", "\\\"")
+    
+    # Use proper AppleScript syntax for PowerPoint export
     applescript = f'''
-        tell application "Microsoft PowerPoint"
-            activate
-            set thePresentation to open POSIX file "{pptx_posix}" with read only
-            export thePresentation to POSIX path "{dest_posix}" as save as PNG
-            close thePresentation saving no
-        end tell
+    tell application "Microsoft PowerPoint"
+        activate
+        set thePresentation to open POSIX file "{pptx_posix}" with read only
+        save thePresentation in POSIX file "{dest_posix}" as save as picture file format PNG
+        close thePresentation saving no
+    end tell
     '''
+    
+    # Clean up the applescript for proper formatting
+    applescript = applescript.strip()
+    
     try:
-        subprocess.run([
+        result = subprocess.run([
             "osascript",
             "-e",
             applescript,
-        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        print(f"AppleScript execution completed: {result.returncode}")
     except FileNotFoundError:
         log("osascript コマンドが見つかりませんでした。macOS でのみ利用できます。", reporter)
         return []
     except subprocess.CalledProcessError as exc:
+        error_msg = exc.stderr.strip() if exc.stderr else str(exc)
         log(
-            f"PowerPoint (macOS) からのサムネイル書き出しに失敗しました: {exc.stderr.decode(errors='ignore').strip()}",
+            f"PowerPoint (macOS) からのサムネイル書き出しに失敗しました: {error_msg}",
             reporter,
         )
+        print(f"AppleScript failed with return code {exc.returncode}")
+        print(f"stderr: {exc.stderr}")
+        print(f"stdout: {exc.stdout}")
+        print(f"Script that failed: {repr(applescript)}")
         return []
     exported = _normalize_powerpoint_export(destination)
     if not exported:
         log("PowerPoint から書き出された PNG が見つかりませんでした。", reporter)
     return exported
+
+
+def _export_thumbnails_via_pdf(
+    pptx_path: Path,
+    slide_count: int,
+    persistent_dir: Path,
+    reporter: Optional[Callable[[str], None]],
+) -> List[Path]:
+    """Generate thumbnails by converting PPTX -> PDF -> PNG."""
+    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
+    if not soffice:
+        log(
+            "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成をスキップします。",
+            reporter,
+        )
+        return []
+
+    pdf_workspace = persistent_dir / "pdf_exports"
+    pdf_workspace.mkdir(parents=True, exist_ok=True)
+    pdf_basename = pptx_path.stem + ".pdf"
+    pdf_path = pdf_workspace / pdf_basename
+
+    try:
+        subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(pdf_workspace),
+                str(pptx_path),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        log(
+            f"LibreOffice での PDF 変換に失敗しました: {exc}. 別の方法にフォールバックします。",
+            reporter,
+        )
+        return []
+
+    if not pdf_path.exists():
+        pdf_candidates = sorted(pdf_workspace.glob("*.pdf"))
+        if not pdf_candidates:
+            log("PDF 変換結果が見つかりませんでした。別の方法にフォールバックします。", reporter)
+            return []
+        pdf_path = pdf_candidates[0]
+
+    poppler_path = os.getenv("POPPLER_PATH") or None
+    try:
+        images = convert_from_path(
+            str(pdf_path),
+            dpi=DEFAULT_THUMBNAIL_DPI,
+            poppler_path=poppler_path,
+            fmt="png",
+        )
+    except Exception as exc:
+        log(
+            f"PDF からの画像変換に失敗しました: {exc}. 別の方法にフォールバックします。",
+            reporter,
+        )
+        return []
+
+    if len(images) != slide_count:
+        log(
+            f"PDF から生成されたページ数 ({len(images)}) がスライド数 ({slide_count}) と一致しません。",
+            reporter,
+        )
+        for image in images:
+            try:
+                image.close()
+            except Exception:
+                pass
+        return []
+
+    exports: List[Path] = []
+    for idx, image in enumerate(images, start=1):
+        dest = persistent_dir / f"slide_{idx:03d}.png"
+        image.save(dest, format="PNG")
+        image.close()
+        exports.append(dest)
+
+    try:
+        pdf_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return exports
 
 
 def generate_thumbnails(
@@ -586,6 +709,11 @@ def generate_thumbnails(
     slide_count = len(prs.slides)
     thumbnails: List[Optional[Path]] = [None] * slide_count
     persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
+
+    pdf_exports = _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
+    if pdf_exports:
+        log("PDF を経由したサムネイル生成に成功しました。", reporter)
+        return pdf_exports
 
     system = platform.system()
     external_dir = persistent_dir / "external"
@@ -872,13 +1000,6 @@ class MainWindow(QMainWindow):
         self.worker.progress.connect(self.append_log)
         self.worker.finished.connect(self.finish_conversion)
         self.worker.start()
-
-    def finish_conversion(self, success: bool, message: str) -> None:
-        self.append_log(message)
-        self.status_bar.showMessage(message, 5000)
-        self.convert_button.setEnabled(True)
-        QMessageBox.information(self, "結果", message if success else f"失敗: {message}")
-        self.worker = None
 
 
 def run_app() -> None:

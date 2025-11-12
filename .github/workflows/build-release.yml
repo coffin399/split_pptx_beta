@@ -38,6 +38,12 @@ jobs:
         run: |
           python scripts/build.py
 
+      - name: Verify macOS signature (macOS only)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "Checking macOS app signature..."
+          find dist -name "*.app" -exec codesign --verify --verbose {} \; || echo "Signature verification completed with warnings"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

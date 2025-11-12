@@ -90,6 +90,21 @@ def _find_macos_app(target_dir: Path) -> Path:
     return candidates[0]
 
 
+def sign_macos_app(app_bundle: Path) -> None:
+    """Apply ad-hoc code signing to macOS app bundle."""
+    print(f"Signing macOS app bundle: {app_bundle}")
+    try:
+        # Ad-hoc signing with "-" identity (self-signed)
+        run(["codesign", "--force", "--deep", "--sign", "-", str(app_bundle)])
+        print(f"Successfully signed: {app_bundle}")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Failed to sign app bundle: {e}")
+        print("App will be created without signature (may show security warnings)")
+    except FileNotFoundError:
+        print("Warning: codesign not found. Skipping signature (macOS only)")
+        print("App will be created without signature (may show security warnings)")
+
+
 def package_artifact(target_dir: Path) -> Path:
     system = platform.system()
     if system == "Windows":
@@ -99,6 +114,8 @@ def package_artifact(target_dir: Path) -> Path:
         return binary
     elif system == "Darwin":
         app_bundle = _find_macos_app(target_dir)
+        # Apply ad-hoc code signing before packaging
+        sign_macos_app(app_bundle)
         archive_base = target_dir / f"{OUTPUT_BASENAME}-macos"
         archive_path = Path(
             shutil.make_archive(

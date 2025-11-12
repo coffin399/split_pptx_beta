@@ -1,3 +1,9 @@
+# Web API dependencies for Render.com deployment
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Core dependencies from original app
 python-pptx>=0.6.21
 # PySide6 provides the Qt based GUI (compatible with Python 3.7+)
 # Install with:
@@ -6,4 +12,5 @@ python-pptx>=0.6.21
 PySide6>=6.6.0,<6.8
 Pillow>=10.0.0
 pdf2image>=1.17.0
+# pdf2image requires poppler binaries. On Render.com we leverage the system package.
 pywin32>=305; platform_system == "Windows"

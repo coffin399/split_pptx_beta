@@ -1,0 +1,22 @@
+services:
+  # Web service
+  - type: web
+    name: pptx-script-slides
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 8000
+    
+  # Background worker (optional for heavy processing)
+  # - type: worker
+  #   name: pptx-processor
+  #   env: docker
+  #   plan: free
+  #   dockerfilePath: ./Dockerfile
+  #   envVars:
+  #     - key: PORT
+  #       value: 8000
