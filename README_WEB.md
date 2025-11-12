@@ -31,9 +31,15 @@ git push origin main
 
 ## 📡 APIエンドポイント
 
-### ヘルスチェック
+### Webインターフェース
 ```
 GET /
+```
+Web UI (Vue.js) を提供します。ブラウザで直接アクセス可能。
+
+### ヘルスチェック
+```
+GET /health
 ```
 レスポンス：
 ```json
@@ -99,6 +105,8 @@ pip install -r requirements_web.txt
 ```bash
 python web_app.py
 ```
+
+ブラウザで `http://localhost:8000` にアクセスして Web UI を使用できます。
 
 ### 3. **APIテスト**
 ```bash

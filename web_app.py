@@ -13,6 +13,7 @@ import zipfile
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -23,6 +24,9 @@ app = FastAPI(
     description="Convert PowerPoint notes to large text slides",
     version="1.0.0"
 )
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # CORS for development
 app.add_middleware(
@@ -44,6 +48,11 @@ task_status = {}
 
 @app.get("/")
 async def root():
+    """Serve the main web interface."""
+    return FileResponse("static/index.html")
+
+@app.get("/health")
+async def health():
     """Health check endpoint."""
     return {"status": "healthy", "service": "PPTX Script Slides API"}
 
