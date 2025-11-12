@@ -51,6 +51,7 @@ MAX_CHARS_PER_SLIDE = 200
 OUTPUT_FILENAME = "スクリプトスライド_自動生成.pptx"
 FONT_NAME = "メイリオ"
 FONT_SIZE_PT = 40
+FONT_BOLD = True
 PAGE_INDICATOR_COLOR = RGBColor(0x00, 0xB0, 0xF0)
 DEFAULT_FONT_COLOR = RGBColor(0xFF, 0xFF, 0xFF)
 TEXTBOX_POSITION = {
@@ -433,7 +434,7 @@ def add_textbox(slide, chunk: List[Segment]) -> None:
         font = paragraph.font
         font.name = FONT_NAME
         font.size = Pt(FONT_SIZE_PT)
-        font.bold = True
+        font.bold = FONT_BOLD
         font.color.rgb = speaker_color(segment.speaker)
 
 
@@ -636,6 +637,13 @@ def _export_thumbnails_via_pdf(
     pdf_path = pdf_workspace / pdf_basename
 
     try:
+        # Set fontconfig environment for better Japanese font support
+        env = os.environ.copy()
+        env.update({
+            'FONTCONFIG_PATH': '/etc/fonts',
+            'FC_DEBUG': '1'  # Enable font debugging if needed
+        })
+        
         subprocess.run(
             [
                 soffice,
@@ -649,6 +657,7 @@ def _export_thumbnails_via_pdf(
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         log(
@@ -665,12 +674,22 @@ def _export_thumbnails_via_pdf(
         pdf_path = pdf_candidates[0]
 
     poppler_path = os.getenv("POPPLER_PATH") or None
+    
+    # Update font cache for better Japanese font detection
+    try:
+        subprocess.run(["fc-cache", "-fv"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass  # Font cache update is optional
+    
     try:
         images = convert_from_path(
             str(pdf_path),
             dpi=DEFAULT_THUMBNAIL_DPI,
             poppler_path=poppler_path,
             fmt="png",
+            # Additional parameters for better font handling
+            thread_count=1,
+            use_pdftocairo=True,
         )
     except Exception as exc:
         log(

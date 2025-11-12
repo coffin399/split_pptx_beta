@@ -12,6 +12,9 @@ RUN apt-get update \
         libreoffice \
         poppler-utils \
         curl \
+        fonts-noto-cjk \
+        fonts-ipafont \
+        fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
