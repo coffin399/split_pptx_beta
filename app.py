@@ -855,80 +855,160 @@ if PYSIDE_AVAILABLE:
             self.output_dir = output_dir
 
         def run(self) -> None:  # noqa: D401
-        file_menu.addAction(exit_action)
-
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setMovable(False)
-        toolbar.addAction(open_action)
-        toolbar.addAction(output_action)
-        toolbar.addSeparator()
-        toolbar.addAction(exit_action)
-        self.addToolBar(toolbar)
-
-        self.worker: Optional[ConversionThread] = None
-
-    def append_log(self, message: str) -> None:
-        self.log_view.append(message)
-        self.log_view.ensureCursorVisible()
-
-    def choose_input_file(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "入力 PPTX を選択",
-            "",
-            "PowerPoint ファイル (*.pptx)",
-        )
-        if file_path:
-            self.input_edit.setText(file_path)
-            if not self.output_edit.text():
-                self.output_edit.setText(str(Path(file_path).parent))
-
-    def choose_output_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "出力フォルダを選択",
-            "",
-        )
-        if directory:
-            self.output_edit.setText(directory)
-
-    def start_conversion(self) -> None:
-        input_path = self.input_edit.text().strip()
-        if not input_path:
-            QMessageBox.warning(self, "入力ファイル", "入力ファイルを選択してください。")
-            return
-        input_file = Path(input_path)
-        if not input_file.exists():
-            QMessageBox.critical(self, "入力ファイル", "入力ファイルが見つかりません。")
-            return
-
-        output_path_value = self.output_edit.text().strip()
-        output_dir = Path(output_path_value) if output_path_value else input_file.parent
-
-        if not output_dir.exists():
             try:
-                output_dir.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                QMessageBox.critical(self, "出力フォルダ", f"出力フォルダを作成できません: {exc}")
+                generate_script_slides(
+                    self.input_file,
+                    self.output_dir,
+                    self.progress.emit,
+                )
+                self.finished.emit(True, "処理が完了しました。")
+            except Exception as exc:  # noqa: BLE001 - keep GUI responsive
+                self.finished.emit(False, f"エラーが発生しました: {exc}")
+
+
+    class MainWindow(QMainWindow):
+        def __init__(self) -> None:
+            super().__init__()
+            self.setWindowTitle("ノート→スクリプトスライド変換")
+            self.resize(960, 720)
+            self.worker: Optional[ConversionThread] = None
+            self._build_ui()
+
+        def _build_ui(self) -> None:
+            central = QWidget(self)
+            layout = QVBoxLayout(central)
+
+            form_layout = QHBoxLayout()
+            layout.addLayout(form_layout)
+
+            self.input_edit = QLineEdit(self)
+            self.input_edit.setPlaceholderText("PowerPoint (.pptx) ファイルを選択してください")
+            browse_button = QPushButton("参照", self)
+            browse_button.clicked.connect(self.choose_input_file)
+
+            form_layout.addWidget(self.input_edit)
+            form_layout.addWidget(browse_button)
+
+            output_layout = QHBoxLayout()
+            layout.addLayout(output_layout)
+
+            self.output_edit = QLineEdit(self)
+            self.output_edit.setPlaceholderText("出力フォルダを選択してください")
+            output_button = QPushButton("参照", self)
+            output_button.clicked.connect(self.choose_output_dir)
+
+            output_layout.addWidget(self.output_edit)
+            output_layout.addWidget(output_button)
+
+            self.convert_button = QPushButton("変換開始", self)
+            self.convert_button.clicked.connect(self.start_conversion)
+            layout.addWidget(self.convert_button)
+
+            self.log_view = QTextEdit(self)
+            self.log_view.setReadOnly(True)
+            layout.addWidget(self.log_view)
+
+            status = QStatusBar(self)
+            self.setStatusBar(status)
+            self.status_bar = status
+
+            self.setCentralWidget(central)
+
+            toolbar = QToolBar("メインツールバー", self)
+            toolbar.setMovable(False)
+
+            open_action = QAction("PowerPointを開く", self)
+            open_action.triggered.connect(self.choose_input_file)
+            toolbar.addAction(open_action)
+
+            output_action = QAction("出力先を開く", self)
+            output_action.triggered.connect(self.choose_output_dir)
+            toolbar.addAction(output_action)
+
+            self.addToolBar(toolbar)
+
+        def append_log(self, message: str) -> None:
+            self.log_view.append(message)
+            self.log_view.ensureCursorVisible()
+            self.status_bar.showMessage(message, 5000)
+
+        def choose_input_file(self) -> None:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "入力 PPTX を選択",
+                "",
+                "PowerPoint ファイル (*.pptx)",
+            )
+            if file_path:
+                self.input_edit.setText(file_path)
+                if not self.output_edit.text():
+                    self.output_edit.setText(str(Path(file_path).parent))
+
+        def choose_output_dir(self) -> None:
+            directory = QFileDialog.getExistingDirectory(
+                self,
+                "出力フォルダを選択",
+                "",
+            )
+            if directory:
+                self.output_edit.setText(directory)
+
+        def start_conversion(self) -> None:
+            input_path = self.input_edit.text().strip()
+            if not input_path:
+                QMessageBox.warning(self, "入力ファイル", "入力ファイルを選択してください。")
+                return
+            input_file = Path(input_path)
+            if not input_file.exists():
+                QMessageBox.critical(self, "入力ファイル", "入力ファイルが見つかりません。")
                 return
 
-        self.log_view.clear()
-        self.append_log("変換を開始します...")
-        self.status_bar.showMessage("変換中...")
-        self.convert_button.setEnabled(False)
+            output_path_value = self.output_edit.text().strip()
+            output_dir = Path(output_path_value) if output_path_value else input_file.parent
 
-        self.worker = ConversionThread(input_file, output_dir)
-        self.worker.progress.connect(self.append_log)
-        self.worker.finished.connect(self.finish_conversion)
-        self.worker.start()
+            if not output_dir.exists():
+                try:
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    QMessageBox.critical(self, "出力フォルダ", f"出力フォルダを作成できません: {exc}")
+                    return
+
+            self.log_view.clear()
+            self.append_log("変換を開始します...")
+            self.convert_button.setEnabled(False)
+            self.status_bar.showMessage("変換中...", 0)
+
+            self.worker = ConversionThread(input_file, output_dir)
+            self.worker.progress.connect(self.append_log)
+            self.worker.finished.connect(self.finish_conversion)
+            self.worker.start()
+
+        def finish_conversion(self, success: bool, message: str) -> None:
+            self.append_log(message)
+            self.status_bar.showMessage("完了" if success else "エラー", 5000)
+            self.convert_button.setEnabled(True)
 
 
-def run_app() -> None:
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    def run_app() -> None:
+        app = QApplication(sys.argv)
+        window = MainWindow()
+        window.show()
+        sys.exit(app.exec())
+
+
+else:
+
+    def run_app() -> None:
+        raise RuntimeError(
+            "PySide6 またはその依存関係が利用できないため GUI を起動できません。"
+            f" 原因: {PYSIDE_IMPORT_ERROR}"
+        )
 
 
 if __name__ == "__main__":
+    if not PYSIDE_AVAILABLE:
+        raise SystemExit(
+            "PySide6 が利用できないため GUI モードを起動できません。"
+            f" 原因: {PYSIDE_IMPORT_ERROR}"
+        )
     run_app()
