@@ -15,6 +15,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
+
+@dataclass
+class Segment:
+    text: str
+    speaker: Optional[str] = None
+
 # Import disk cache for memory optimization
 try:
     from cache import get_cache, cleanup_cache
