@@ -273,9 +273,11 @@ async def process_conversion(
     finally:
         # Force garbage collection to free memory
         force_garbage_collection()
-        
-        # Cleanup on error
-        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        # Cleanup workspace only when conversion failed
+        status = task_status.get(task_id, {})
+        if status.get("status") != "completed":
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.delete("/cleanup/{task_id}")
 async def cleanup_task(task_id: str):
