@@ -159,10 +159,14 @@ async def convert_pptx(
     output_path = temp_dir / "スクリプトスライド_自動生成.pptx"
     
     try:
-        # Save uploaded file
+        # Save uploaded file in streaming fashion to avoid large memory spikes
+        chunk_size = 4 * 1024 * 1024  # 4MB
         with open(input_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                buffer.write(chunk)
         
         # Initialize task status with creation time
         task_status[task_id] = {
@@ -205,7 +209,7 @@ async def get_status(task_id: str):
     )
 
 @app.get("/download/{task_id}")
-async def download_file(task_id: str):
+async def download_file(task_id: str, background_tasks: BackgroundTasks):
     """Download converted file."""
     if task_id not in task_status:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -221,10 +225,13 @@ async def download_file(task_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     
+    background_tasks.add_task(_cleanup_task_files, task_id)
+
     return FileResponse(
         path=file_path,
         filename="スクリプトスライド_自動生成.pptx",
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        background=background_tasks
     )
 
 async def process_conversion(
@@ -279,35 +286,37 @@ async def process_conversion(
         if status.get("status") != "completed":
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-@app.delete("/cleanup/{task_id}")
-async def cleanup_task(task_id: str):
-    """Clean up task files."""
-    if task_id not in task_status:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    status_data = task_status[task_id]
-    
-    # Clean up file if exists
-    if status_data.get("file_path"):
-        file_path = Path(status_data["file_path"])
+def _cleanup_task_files(task_id: str) -> None:
+    """Background-safe cleanup for task artifacts."""
+    status_data = task_status.pop(task_id, None)
+    if not status_data:
+        return
+
+    file_path_value = status_data.get("file_path")
+    if file_path_value:
+        file_path = Path(file_path_value)
         try:
             if file_path.exists():
                 file_path.unlink()
         except Exception:
             pass
-        
-        # Try to cleanup parent temp directory
+
         try:
             shutil.rmtree(file_path.parent, ignore_errors=True)
         except Exception:
             pass
-    
-    # Remove from memory
-    del task_status[task_id]
-    
-    # Force garbage collection
+
     force_garbage_collection()
-    
+
+
+@app.delete("/cleanup/{task_id}")
+async def cleanup_task(task_id: str):
+    """Clean up task files."""
+    if task_id not in task_status:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _cleanup_task_files(task_id)
+
     return {"message": "Task cleaned up successfully"}
 
 if __name__ == "__main__":
