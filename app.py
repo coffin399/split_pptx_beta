@@ -831,12 +831,18 @@ def _export_thumbnails_via_pdf(
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass  # Font cache update is optional
     
+    image_output_dir = persistent_dir / "pdf_images"
+    image_output_dir.mkdir(parents=True, exist_ok=True)
+
     try:
-        images = convert_from_path(
+        image_paths = convert_from_path(
             str(pdf_path),
             dpi=optimal_dpi,  # Use optimal DPI instead of DEFAULT_THUMBNAIL_DPI
             poppler_path=poppler_path,
             fmt="png",
+            output_folder=str(image_output_dir),
+            output_file="slide",
+            paths_only=True,
             # Additional parameters for better font handling and memory efficiency
             thread_count=1,  # Single thread to reduce memory usage
             use_pdftocairo=True,
@@ -846,40 +852,29 @@ def _export_thumbnails_via_pdf(
             f"PDF からの画像変換に失敗しました: {exc}. 別の方法にフォールバックします。",
             reporter,
         )
+        shutil.rmtree(image_output_dir, ignore_errors=True)
         return []
 
-    if len(images) != slide_count:
+    if len(image_paths) != slide_count:
         log(
-            f"PDF から生成されたページ数 ({len(images)}) がスライド数 ({slide_count}) と一致しません。",
+            f"PDF から生成されたページ数 ({len(image_paths)}) がスライド数 ({slide_count}) と一致しません。",
             reporter,
         )
-        # Enhanced cleanup: close all images and clear from memory
-        for image in images:
-            try:
-                image.close()
-            except Exception:
-                pass
-        # Explicitly clear the list to free memory
-        images.clear()
+        shutil.rmtree(image_output_dir, ignore_errors=True)
         return []
 
     exports: List[Path] = []
-    for idx, image in enumerate(images, start=1):
+    for idx, image_path in enumerate(sorted(image_paths), start=1):
+        src = Path(image_path)
         dest = persistent_dir / f"slide_{idx:03d}.png"
         try:
-            image.save(dest, format="PNG")
+            shutil.move(str(src), dest)
         except Exception as exc:
             log(f"画像 {idx} の保存に失敗しました: {exc}", reporter)
-        finally:
-            # Always close the image, even if save fails
-            try:
-                image.close()
-            except Exception:
-                pass
+            continue
         exports.append(dest)
 
-    # Clear the images list to free memory
-    images.clear()
+    shutil.rmtree(image_output_dir, ignore_errors=True)
 
     try:
         pdf_path.unlink(missing_ok=True)
