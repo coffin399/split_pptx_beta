@@ -18,3 +18,6 @@ pywin32>=305; platform_system == "Windows"
 # Additional dependencies for web functionality
 jinja2>=3.1.0
 aiofiles>=23.0.0
+
+# Memory monitoring
+psutil>=5.9.0

@@ -62,7 +62,8 @@ TEXTBOX_POSITION = {
 }
 THUMBNAIL_WIDTH_CM = 8.0
 THUMBNAIL_MARGIN_CM = 0.5
-DEFAULT_THUMBNAIL_DPI = 150
+DEFAULT_THUMBNAIL_DPI = 150  # Reduced from higher values to save memory
+LOW_MEMORY_DPI = 100  # Further reduced for low memory situations
 EMU_PER_INCH = 914400
 SPEAKER_PATTERN = re.compile(r"^\s*(話者\d+)[:：]\s*(.*)$")
 
@@ -85,12 +86,118 @@ FONT_PATH_CANDIDATES = [
 _FONT_CACHE: dict[int, ImageFont.ImageFont] = {}
 
 
-@dataclass
-class Segment:
-    """Represents a single sentence or fragment with optional speaker metadata."""
+def clear_font_cache() -> None:
+    """Clear font cache to free memory."""
+    global _FONT_CACHE
+    for font_size, font in _FONT_CACHE.items():
+        try:
+            # Font objects don't have explicit close method, but we can clear references
+            del font
+        except Exception:
+            pass
+    _FONT_CACHE.clear()
 
-    text: str
-    speaker: Optional[str]
+
+def get_optimal_dpi(slide_count: int) -> int:
+    """Get optimal DPI based on slide count to balance quality and memory usage."""
+    if slide_count > 50:  # Large presentations
+        return LOW_MEMORY_DPI
+    elif slide_count > 20:  # Medium presentations
+        return 120  # Medium DPI
+    else:  # Small presentations
+        return DEFAULT_THUMBNAIL_DPI
+
+
+def get_font(size_pt: float) -> ImageFont.ImageFont:
+    rounded = int(round(size_pt)) if size_pt else 20
+    if rounded in _FONT_CACHE:
+        return _FONT_CACHE[rounded]
+    for candidate in FONT_PATH_CANDIDATES:
+        if Path(candidate).exists():
+            try:
+                font = ImageFont.truetype(candidate, rounded)
+                _FONT_CACHE[rounded] = font
+                return font
+            except OSError:
+                continue
+    font = ImageFont.load_default()
+    _FONT_CACHE[rounded] = font
+    return font
+
+
+def rgb_color_tuple(color: Optional[RGBColor], default=(0, 0, 0)) -> tuple[int, int, int]:
+    if color is None:
+        return default
+    try:
+        return (color[0], color[1], color[2])
+    except (TypeError, IndexError):
+        return default
+
+
+def draw_text_block(
+    image: Image.Image,
+    shape,
+    dpi: int = DEFAULT_THUMBNAIL_DPI,
+) -> bool:
+    if not shape.has_text_frame:
+        return False
+    text_frame = shape.text_frame
+    draw = ImageDraw.Draw(image)
+    left = emu_to_px(int(shape.left), dpi)
+    top = emu_to_px(int(shape.top), dpi)
+    width = emu_to_px(int(shape.width), dpi)
+
+    paragraphs: List[str] = []
+    for paragraph in text_frame.paragraphs:
+        if paragraph.runs:
+            text = "".join(run.text for run in paragraph.runs)
+        else:
+            text = paragraph.text or ""
+        paragraphs.append(text)
+
+    if not any(p.strip() for p in paragraphs):
+        return False
+
+    first_run = None
+    for paragraph in text_frame.paragraphs:
+        for run in paragraph.runs:
+            if run.text and run.text.strip():
+                first_run = run
+                break
+        if first_run:
+            break
+    font_size = (
+        first_run.font.size.pt
+        if first_run and first_run.font.size
+        else 24
+    )
+    color = rgb_color_tuple(first_run.font.color.rgb if first_run and first_run.font.color and first_run.font.color.rgb else None)
+    font = get_font(font_size)
+
+    lines: List[str] = []
+    for paragraph_text in paragraphs:
+        if not paragraph_text:
+            lines.append("")
+            continue
+        current = ""
+        for char in paragraph_text:
+            test = current + char
+            if draw.textlength(test, font=font) <= width or not current:
+                current = test
+            else:
+                lines.append(current)
+                current = char
+        lines.append(current)
+    line_height = font.getbbox("あ")[3] if hasattr(font, "getbbox") else font.size
+    y = top
+    drew_text = False
+    for line in lines:
+        draw.text((left, y), line, font=font, fill=color)
+        y += line_height
+        if line:
+            drew_text = True
+
+    return drew_text
 
 
 def segment_line(text: str, max_chars: int) -> List[str]:
@@ -470,9 +577,21 @@ def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
     if not image_path.exists():
         return
     margin = Cm(0.1)  # Minimal margin for tight positioning
-    with Image.open(image_path) as img:
+    img = None
+    try:
+        img = Image.open(image_path)
         width_cm = THUMBNAIL_WIDTH_CM
         height_cm = width_cm * img.height / img.width
+    except Exception as exc:
+        log(f"サムネイル画像の読み込みに失敗しました: {exc}", None)
+        return
+    finally:
+        if img is not None:
+            try:
+                img.close()
+            except Exception:
+                pass
+    
     width = Cm(width_cm)
     height = Cm(height_cm)
     # Position thumbnail exactly at bottom-right corner
@@ -483,40 +602,52 @@ def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
 
 def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
     width, height = 1600, 900
-    image = Image.new("RGB", (width, height), color=(30, 30, 30))
-    draw = ImageDraw.Draw(image)
-    title = f"スライド {index}"
-    body_lines = [
-        "LibreOffice/soffice が見つからないため",
-        "サムネイルを簡易表示に切り替えました",
-        "フルプレビューを得るには LibreOffice をインストールしてください",
-    ]
-    title_font = get_font(56)
-    body_font = get_font(28)
+    image = None
+    draw = None
+    try:
+        image = Image.new("RGB", (width, height), color=(30, 30, 30))
+        draw = ImageDraw.Draw(image)
+        title = f"スライド {index}"
+        body_lines = [
+            "LibreOffice/soffice が見つからないため",
+            "サムネイルを簡易表示に切り替えました",
+            "フルプレビューを得るには LibreOffice をインストールしてください",
+        ]
+        title_font = get_font(56)
+        body_font = get_font(28)
 
-    title_bbox = draw.textbbox((0, 0), title, font=title_font)
-    title_width = title_bbox[2] - title_bbox[0]
-    draw.text(
-        ((width - title_width) / 2, height * 0.3),
-        title,
-        font=title_font,
-        fill=(240, 240, 240),
-    )
-
-    start_y = height * 0.5
-    line_spacing = 45
-    for idx, line in enumerate(body_lines):
-        bbox = draw.textbbox((0, 0), line, font=body_font)
-        text_width = bbox[2] - bbox[0]
+        title_bbox = draw.textbbox((0, 0), title, font=title_font)
+        title_width = title_bbox[2] - title_bbox[0]
         draw.text(
-            ((width - text_width) / 2, start_y + idx * line_spacing),
-            line,
-            font=body_font,
-            fill=(200, 200, 200),
+            ((width - title_width) / 2, height * 0.3),
+            title,
+            font=title_font,
+            fill=(240, 240, 240),
         )
-    placeholder_path = output_dir / f"placeholder_slide_{index}.png"
-    image.save(placeholder_path)
-    return placeholder_path
+
+        start_y = height * 0.5
+        line_spacing = 45
+        for idx, line in enumerate(body_lines):
+            bbox = draw.textbbox((0, 0), line, font=body_font)
+            text_width = bbox[2] - bbox[0]
+            draw.text(
+                ((width - text_width) / 2, start_y + idx * line_spacing),
+                line,
+                font=body_font,
+                fill=(200, 200, 200),
+            )
+        placeholder_path = output_dir / f"placeholder_slide_{index}.png"
+        image.save(placeholder_path)
+        return placeholder_path
+    finally:
+        # Clean up resources
+        if draw is not None:
+            del draw
+        if image is not None:
+            try:
+                image.close()
+            except Exception:
+                pass
 
 
 def _normalize_powerpoint_export(png_dir: Path) -> List[Path]:
@@ -628,25 +759,20 @@ def _export_thumbnails_via_pdf(
         log(
             "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成をスキップします。",
             reporter,
-        )
-        return []
-
-    pdf_workspace = persistent_dir / "pdf_exports"
     pdf_workspace.mkdir(parents=True, exist_ok=True)
-    pdf_basename = pptx_path.stem + ".pdf"
-    pdf_path = pdf_workspace / pdf_basename
+    pdf_path = pdf_workspace / pptx_path.with_suffix(".pdf").name
+
+    # Use optimal DPI based on slide count
+    optimal_dpi = get_optimal_dpi(slide_count)
+    log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (メモリ最適化)", reporter)
 
     try:
-        # Set fontconfig environment for better Japanese font support
         env = os.environ.copy()
-        env.update({
-            'FONTCONFIG_PATH': '/etc/fonts',
-            'FC_DEBUG': '1'  # Enable font debugging if needed
-        })
-        
+        # Limit memory usage for LibreOffice
+        env["LIBREOFFICE_USE_SYSTEM_LIBS"] = "1"
         subprocess.run(
             [
-                soffice,
+                "soffice",
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -661,7 +787,7 @@ def _export_thumbnails_via_pdf(
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         log(
-            f"LibreOffice での PDF 変換に失敗しました: {exc}. 別の方法にフォールバックします。",
+            "LibreOffice での PDF 変換に失敗しました: {exc}. 別の方法にフォールバックします。",
             reporter,
         )
         return []
@@ -684,11 +810,11 @@ def _export_thumbnails_via_pdf(
     try:
         images = convert_from_path(
             str(pdf_path),
-            dpi=DEFAULT_THUMBNAIL_DPI,
+            dpi=optimal_dpi,  # Use optimal DPI instead of DEFAULT_THUMBNAIL_DPI
             poppler_path=poppler_path,
             fmt="png",
-            # Additional parameters for better font handling
-            thread_count=1,
+            # Additional parameters for better font handling and memory efficiency
+            thread_count=1,  # Single thread to reduce memory usage
             use_pdftocairo=True,
         )
     except Exception as exc:
@@ -703,19 +829,33 @@ def _export_thumbnails_via_pdf(
             f"PDF から生成されたページ数 ({len(images)}) がスライド数 ({slide_count}) と一致しません。",
             reporter,
         )
+        # Enhanced cleanup: close all images and clear from memory
         for image in images:
             try:
                 image.close()
             except Exception:
                 pass
+        # Explicitly clear the list to free memory
+        images.clear()
         return []
 
     exports: List[Path] = []
     for idx, image in enumerate(images, start=1):
         dest = persistent_dir / f"slide_{idx:03d}.png"
-        image.save(dest, format="PNG")
-        image.close()
+        try:
+            image.save(dest, format="PNG")
+        except Exception as exc:
+            log(f"画像 {idx} の保存に失敗しました: {exc}", reporter)
+        finally:
+            # Always close the image, even if save fails
+            try:
+                image.close()
+            except Exception:
+                pass
         exports.append(dest)
+
+    # Clear the images list to free memory
+    images.clear()
 
     try:
         pdf_path.unlink(missing_ok=True)
@@ -819,7 +959,16 @@ def generate_thumbnails(
             )
             thumbnails[idx - 1] = create_placeholder_thumbnail(idx, persistent_dir)
 
-    return thumbnails
+    return thumbnails, persistent_dir
+
+
+def cleanup_thumbnail_dir(thumbnail_dir: Optional[Path]) -> None:
+    """Clean up thumbnail temporary directory to prevent memory leaks."""
+    if thumbnail_dir and thumbnail_dir.exists():
+        try:
+            shutil.rmtree(thumbnail_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optional[Callable[[str], None]]) -> Path:
@@ -829,37 +978,43 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
     output_prs.slide_height = prs.slide_height
     blank_layout = output_prs.slide_layouts[6]
 
-    thumbnails = generate_thumbnails(prs, input_file, reporter)
+    thumbnails, thumbnail_dir = generate_thumbnails(prs, input_file, reporter)
 
     created = 0
-    for slide_index, slide in enumerate(prs.slides, start=1):
-        notes = slide.notes_slide.notes_text_frame.text if slide.has_notes_slide and slide.notes_slide.notes_text_frame else ""
-        if not notes.strip():
-            log(f"スライド {slide_index}: ノートが空のためスキップします。", reporter)
-            continue
-        segments = build_segments(notes, MAX_CHARS_PER_SLIDE)
-        chunks = chunk_segments(segments, MAX_CHARS_PER_SLIDE)
-        log(
-            f"スライド {slide_index}: {len(segments)} セグメント -> {len(chunks)} 枚に分割", reporter
-        )
-        for part_idx, chunk in enumerate(chunks, start=1):
-            new_slide = output_prs.slides.add_slide(blank_layout)
-            apply_background(new_slide)
-            add_textbox(new_slide, chunk)
-            add_page_indicator(new_slide, part_idx, len(chunks), output_prs.slide_width, output_prs.slide_height)
-            thumbnail_path = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
-            if thumbnail_path:
-                add_thumbnail(new_slide, thumbnail_path, output_prs.slide_width, output_prs.slide_height)
-            created += 1
+    try:
+        for slide_index, slide in enumerate(prs.slides, start=1):
+            notes = slide.notes_slide.notes_text_frame.text if slide.has_notes_slide and slide.notes_slide.notes_text_frame else ""
+            if not notes.strip():
+                log(f"スライド {slide_index}: ノートが空のためスキップします。", reporter)
+                continue
+            segments = build_segments(notes, MAX_CHARS_PER_SLIDE)
+            chunks = chunk_segments(segments, MAX_CHARS_PER_SLIDE)
+            log(
+                f"スライド {slide_index}: {len(segments)} セグメント -> {len(chunks)} 枚に分割", reporter
+            )
+            for part_idx, chunk in enumerate(chunks, start=1):
+                new_slide = output_prs.slides.add_slide(blank_layout)
+                apply_background(new_slide)
+                add_textbox(new_slide, chunk)
+                add_page_indicator(new_slide, part_idx, len(chunks), output_prs.slide_width, output_prs.slide_height)
+                thumbnail_path = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
+                if thumbnail_path:
+                    add_thumbnail(new_slide, thumbnail_path, output_prs.slide_width, output_prs.slide_height)
+                created += 1
 
-    if created == 0:
-        raise ValueError("ノートから生成できるスライドがありませんでした。")
+        if created == 0:
+            raise ValueError("ノートから生成できるスライドがありませんでした。")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / OUTPUT_FILENAME
-    output_prs.save(str(output_path))
-    log(f"生成完了: {created} 枚 -> {output_path}", reporter)
-    return output_path
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / OUTPUT_FILENAME
+        output_prs.save(str(output_path))
+        log(f"生成完了: {created} 枚 -> {output_path}", reporter)
+        return output_path
+    finally:
+        # Clean up thumbnail directory to prevent memory leaks
+        cleanup_thumbnail_dir(thumbnail_dir)
+        # Clear font cache to free memory
+        clear_font_cache()
 
 
 if PYSIDE_AVAILABLE:

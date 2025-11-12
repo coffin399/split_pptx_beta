@@ -16,6 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
+import gc
+import psutil
+import time
 
 from app import generate_script_slides
 
@@ -46,6 +49,49 @@ class ConversionStatus(BaseModel):
 # In-memory storage for demo (use Redis/database in production)
 task_status = {}
 
+# Memory monitoring and cleanup
+MAX_MEMORY_MB = 400  # Maximum memory usage before forced cleanup
+CLEANUP_INTERVAL = 300  # Check every 5 minutes
+last_cleanup = time.time()
+
+def get_memory_usage() -> float:
+    """Get current memory usage in MB."""
+    try:
+        process = psutil.Process()
+        return process.memory_info().rss / 1024 / 1024
+    except Exception:
+        return 0.0
+
+def force_garbage_collection() -> None:
+    """Force garbage collection to free memory."""
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+def auto_cleanup_if_needed() -> None:
+    """Automatically cleanup if memory usage is too high."""
+    global last_cleanup
+    current_time = time.time()
+    
+    # Check memory usage periodically
+    if current_time - last_cleanup > CLEANUP_INTERVAL:
+        memory_mb = get_memory_usage()
+        if memory_mb > MAX_MEMORY_MB:
+            # Clean up old completed tasks
+            old_tasks = []
+            for task_id, status in task_status.items():
+                if status.get("status") == "completed" and status.get("created_at", 0) < current_time - 3600:
+                    old_tasks.append(task_id)
+            
+            for task_id in old_tasks:
+                cleanup_task(task_id)
+            
+            # Force garbage collection
+            force_garbage_collection()
+        
+        last_cleanup = current_time
+
 @app.get("/")
 async def root():
     """Serve the main web interface."""
@@ -53,8 +99,15 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "PPTX Script Slides API"}
+    """Health check endpoint with memory info."""
+    auto_cleanup_if_needed()
+    memory_mb = get_memory_usage()
+    return {
+        "status": "healthy", 
+        "service": "PPTX Script Slides API",
+        "memory_usage_mb": round(memory_mb, 2),
+        "active_tasks": len(task_status)
+    }
 
 @app.post("/convert")
 async def convert_pptx(
@@ -62,6 +115,15 @@ async def convert_pptx(
     file: UploadFile = File(..., description="PowerPoint file to convert")
 ):
     """Upload and convert PowerPoint file to script slides."""
+    
+    # Check memory usage before accepting new task
+    auto_cleanup_if_needed()
+    memory_mb = get_memory_usage()
+    if memory_mb > MAX_MEMORY_MB:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Server memory usage too high ({memory_mb:.1f}MB). Please try again later."
+        )
     
     # Validate file type
     if not file.filename or not file.filename.lower().endswith('.pptx'):
@@ -82,11 +144,12 @@ async def convert_pptx(
             content = await file.read()
             buffer.write(content)
         
-        # Initialize task status
+        # Initialize task status with creation time
         task_status[task_id] = {
             "status": "processing",
             "message": "Conversion started...",
-            "download_url": None
+            "download_url": None,
+            "created_at": time.time()
         }
         
         # Process in background
@@ -176,8 +239,8 @@ async def process_conversion(
         task_status[task_id].update({
             "status": "completed",
             "message": "Conversion completed successfully!",
-            "file_path": str(final_path),
-            "download_url": f"/download/{task_id}"
+            "download_url": f"/download/{task_id}",
+            "file_path": str(final_path)
         })
         
     except Exception as e:
@@ -187,6 +250,9 @@ async def process_conversion(
             "message": f"Conversion failed: {str(e)}",
             "download_url": None
         })
+    finally:
+        # Force garbage collection to free memory
+        force_garbage_collection()
         
         # Cleanup on error
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -198,17 +264,27 @@ async def cleanup_task(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     
     status_data = task_status[task_id]
+    
+    # Clean up file if exists
     if status_data.get("file_path"):
         file_path = Path(status_data["file_path"])
-        if file_path.exists():
-            # Try to cleanup parent temp directory
-            try:
-                shutil.rmtree(file_path.parent, ignore_errors=True)
-            except:
-                pass
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except Exception:
+            pass
+        
+        # Try to cleanup parent temp directory
+        try:
+            shutil.rmtree(file_path.parent, ignore_errors=True)
+        except Exception:
+            pass
     
     # Remove from memory
     del task_status[task_id]
+    
+    # Force garbage collection
+    force_garbage_collection()
     
     return {"message": "Task cleaned up successfully"}
 
