@@ -15,24 +15,29 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QAction, QFont
-from PySide6.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QMenuBar,
-    QMessageBox,
-    QPushButton,
-    QStatusBar,
-    QTextEdit,
-    QToolBar,
-    QVBoxLayout,
-    QWidget,
-    QHBoxLayout,
-)
+try:  # GUI dependencies are optional in headless deployments (e.g., Render.com)
+    from PySide6.QtCore import Qt, QThread, Signal
+    from PySide6.QtGui import QAction, QFont
+    from PySide6.QtWidgets import (
+        QApplication,
+        QFileDialog,
+        QLabel,
+        QLineEdit,
+        QMainWindow,
+        QMenuBar,
+        QMessageBox,
+        QPushButton,
+        QStatusBar,
+        QTextEdit,
+        QToolBar,
+        QVBoxLayout,
+        QWidget,
+        QHBoxLayout,
+    )
+    PYSIDE_AVAILABLE = True
+except Exception as exc:  # noqa: BLE001 - broad to catch missing libGL, etc.
+    PYSIDE_AVAILABLE = False
+    PYSIDE_IMPORT_ERROR = exc
 from PIL import Image, ImageDraw, ImageFont
 from pdf2image import convert_from_path
 from pptx import Presentation
@@ -838,102 +843,18 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
     return output_path
 
 
-class ConversionThread(QThread):
-    progress = Signal(str)
-    finished = Signal(bool, str)
+if PYSIDE_AVAILABLE:
 
-    def __init__(self, input_file: Path, output_dir: Path):
-        super().__init__()
-        self.input_file = input_file
-        self.output_dir = output_dir
+    class ConversionThread(QThread):
+        progress = Signal(str)
+        finished = Signal(bool, str)
 
-    def run(self) -> None:  # noqa: D401
-        try:
-            generate_script_slides(self.input_file, self.output_dir, self.progress.emit)
-            self.finished.emit(True, "処理が完了しました。")
-        except Exception as exc:  # pylint: disable=broad-except
-            self.finished.emit(False, f"エラーが発生しました: {exc}")
+        def __init__(self, input_file: Path, output_dir: Path):
+            super().__init__()
+            self.input_file = input_file
+            self.output_dir = output_dir
 
-
-class MainWindow(QMainWindow):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle("PPTX スクリプトスライド生成ツール")
-        self.resize(900, 600)
-
-        self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("変換するPowerPointファイル(.pptx)を選択")
-
-        input_button = QPushButton("参照…")
-        input_button.clicked.connect(self.choose_input_file)  # type: ignore[arg-type]
-
-        input_layout = QHBoxLayout()
-        input_layout.addWidget(QLabel("入力 PPTX"))
-        input_layout.addWidget(self.input_edit)
-        input_layout.addWidget(input_button)
-
-        self.output_edit = QLineEdit()
-        self.output_edit.setPlaceholderText("保存先フォルダ (未指定の場合は入力ファイルと同じフォルダ)")
-
-        output_button = QPushButton("参照…")
-        output_button.clicked.connect(self.choose_output_dir)  # type: ignore[arg-type]
-
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel("出力フォルダ"))
-        output_layout.addWidget(self.output_edit)
-        output_layout.addWidget(output_button)
-
-        self.convert_button = QPushButton("変換")
-        self.convert_button.setDefault(True)
-        self.convert_button.clicked.connect(self.start_conversion)  # type: ignore[arg-type]
-
-        exit_button = QPushButton("終了")
-        exit_button.clicked.connect(self.close)  # type: ignore[arg-type]
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.convert_button)
-        button_layout.addWidget(exit_button)
-
-        self.log_view = QTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setPlaceholderText("ここに処理ログが表示されます")
-
-        central_widget = QWidget()
-        layout = QVBoxLayout(central_widget)
-        header_label = QLabel("PowerPointファイルを選んで変換してください。")
-        header_font = QFont()
-        header_font.setPointSize(12)
-        header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        layout.addWidget(header_label)
-        layout.addLayout(input_layout)
-        layout.addLayout(output_layout)
-        layout.addLayout(button_layout)
-        layout.addWidget(self.log_view)
-
-        self.setCentralWidget(central_widget)
-
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-
-        self.menu_bar = QMenuBar()
-        self.setMenuBar(self.menu_bar)
-
-        file_menu = self.menu_bar.addMenu("ファイル")
-        open_action = QAction("入力ファイルを開く", self)
-        open_action.triggered.connect(self.choose_input_file)  # type: ignore[arg-type]
-        file_menu.addAction(open_action)
-
-        output_action = QAction("出力フォルダを選択", self)
-        output_action.triggered.connect(self.choose_output_dir)  # type: ignore[arg-type]
-        file_menu.addAction(output_action)
-
-        file_menu.addSeparator()
-
-        exit_action = QAction("終了", self)
-        exit_action.triggered.connect(self.close)  # type: ignore[arg-type]
+        def run(self) -> None:  # noqa: D401
         file_menu.addAction(exit_action)
 
         toolbar = QToolBar("Main Toolbar")
