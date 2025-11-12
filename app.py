@@ -914,12 +914,12 @@ def generate_thumbnails(
         
         if cache_hits > 0:
             log(f"キャッシュから {cache_hits}/{slide_count} 枚のサムネイルを読み込みました", reporter)
-            
+
             # Only generate missing thumbnails
             missing_indices = [i for i, path in enumerate(thumbnails) if path is None]
             if not missing_indices:
                 log("すべてのサムネイルがキャッシュに存在しました", reporter)
-                return thumbnails
+                return thumbnails, None
     
     persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
 
@@ -933,7 +933,7 @@ def generate_thumbnails(
                 cache.put(pptx_path, idx, optimal_dpi, path)
             log(f"{len(pdf_exports)} 枚のサムネイルをキャッシュに保存しました", reporter)
         
-        return pdf_exports
+        return pdf_exports, persistent_dir
 
     system = platform.system()
     external_dir = persistent_dir / "external"
