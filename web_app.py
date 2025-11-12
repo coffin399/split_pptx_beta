@@ -20,6 +20,17 @@ import gc
 import psutil
 import time
 
+# Import disk cache for memory optimization
+try:
+    from cache import get_cache, cleanup_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    def get_cache():
+        return None
+    def cleanup_cache():
+        pass
+
 from app import generate_script_slides
 
 app = FastAPI(
@@ -102,11 +113,20 @@ async def health():
     """Health check endpoint with memory info."""
     auto_cleanup_if_needed()
     memory_mb = get_memory_usage()
+    
+    # Include cache statistics if available
+    cache_stats = {}
+    if CACHE_AVAILABLE:
+        cache = get_cache()
+        if cache:
+            cache_stats = cache.get_stats()
+    
     return {
         "status": "healthy", 
         "service": "PPTX Script Slides API",
         "memory_usage_mb": round(memory_mb, 2),
-        "active_tasks": len(task_status)
+        "active_tasks": len(task_status),
+        "cache": cache_stats
     }
 
 @app.post("/convert")

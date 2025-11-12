@@ -15,6 +15,17 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
+# Import disk cache for memory optimization
+try:
+    from cache import get_cache, cleanup_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    def get_cache():
+        return None
+    def cleanup_cache():
+        pass
+
 try:  # GUI dependencies are optional in headless deployments (e.g., Render.com)
     from PySide6.QtCore import Qt, QThread, Signal
     from PySide6.QtGui import QAction, QFont
@@ -64,6 +75,7 @@ THUMBNAIL_WIDTH_CM = 8.0
 THUMBNAIL_MARGIN_CM = 0.5
 DEFAULT_THUMBNAIL_DPI = 150  # Reduced from higher values to save memory
 LOW_MEMORY_DPI = 100  # Further reduced for low memory situations
+ULTRA_LOW_DPI = 80   # For very large presentations (100+ slides)
 EMU_PER_INCH = 914400
 SPEAKER_PATTERN = re.compile(r"^\s*(話者\d+)[:：]\s*(.*)$")
 
@@ -100,7 +112,9 @@ def clear_font_cache() -> None:
 
 def get_optimal_dpi(slide_count: int) -> int:
     """Get optimal DPI based on slide count to balance quality and memory usage."""
-    if slide_count > 50:  # Large presentations
+    if slide_count > 100:  # Very large presentations - ultra low memory
+        return 80
+    elif slide_count > 50:  # Large presentations
         return LOW_MEMORY_DPI
     elif slide_count > 20:  # Medium presentations
         return 120  # Medium DPI
@@ -876,11 +890,43 @@ def generate_thumbnails(
 ) -> List[Optional[Path]]:
     slide_count = len(prs.slides)
     thumbnails: List[Optional[Path]] = [None] * slide_count
+    optimal_dpi = get_optimal_dpi(slide_count)
+    
+    # Try to use disk cache for memory efficiency
+    cache = get_cache() if CACHE_AVAILABLE else None
+    if cache:
+        cache_stats = cache.get_stats()
+        log(f"キャッシュ使用量: {cache_stats['total_size_mb']}MB ({cache_stats['usage_percent']}%)", reporter)
+        
+        # Check cache for existing thumbnails
+        cache_hits = 0
+        for idx in range(slide_count):
+            cached_path = cache.get(pptx_path, idx, optimal_dpi)
+            if cached_path:
+                thumbnails[idx] = cached_path
+                cache_hits += 1
+        
+        if cache_hits > 0:
+            log(f"キャッシュから {cache_hits}/{slide_count} 枚のサムネイルを読み込みました", reporter)
+            
+            # Only generate missing thumbnails
+            missing_indices = [i for i, path in enumerate(thumbnails) if path is None]
+            if not missing_indices:
+                log("すべてのサムネイルがキャッシュに存在しました", reporter)
+                return thumbnails
+    
     persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
 
     pdf_exports = _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
     if pdf_exports:
         log("PDF を経由したサムネイル生成に成功しました。", reporter)
+        
+        # Store in cache if available
+        if cache:
+            for idx, path in enumerate(pdf_exports):
+                cache.put(pptx_path, idx, optimal_dpi, path)
+            log(f"{len(pdf_exports)} 枚のサムネイルをキャッシュに保存しました", reporter)
+        
         return pdf_exports
 
     system = platform.system()
