@@ -209,7 +209,11 @@
 
                         this.taskId = response.data.task_id;
                         this.status = response.data;
-                        this.addLog(this.status.message || '変換を開始しました');
+                        if (Array.isArray(response.data.logs)) {
+                            response.data.logs.forEach((entry) => this.addLog(entry));
+                        } else {
+                            this.addLog(this.status.message || '変換を開始しました');
+                        }
                         this.startPolling();
                     } catch (error) {
                         console.error('Upload error:', error);
@@ -256,7 +260,11 @@
                         try {
                             const response = await axios.get(`/status/${this.taskId}`);
                             this.status = response.data;
-                            this.addLog(this.status.message);
+                            if (Array.isArray(response.data.logs)) {
+                                response.data.logs.forEach((entry) => this.addLog(entry));
+                            } else {
+                                this.addLog(this.status.message);
+                            }
                             
                             // Update progress (simulated)
                             if (this.status.status === 'processing') {
@@ -282,6 +290,9 @@
                 async downloadFile() {
                     if (this.status && this.status.download_url) {
                         window.open(this.status.download_url, '_blank');
+                        if (Array.isArray(this.status.logs)) {
+                            this.status.logs.forEach((entry) => this.addLog(entry));
+                        }
                     }
                 },
                 formatFileSize(bytes) {

@@ -14,7 +14,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 import gc
 import psutil
@@ -56,6 +56,7 @@ class ConversionStatus(BaseModel):
     status: str
     message: str
     download_url: Optional[str] = None
+    logs: List[str] = Field(default_factory=list)
 
 # In-memory storage for demo (use Redis/database in production)
 task_status = {}
@@ -173,7 +174,8 @@ async def convert_pptx(
             "status": "processing",
             "message": "Conversion started...",
             "download_url": None,
-            "created_at": time.time()
+            "created_at": time.time(),
+            "logs": ["Conversion started..."]
         }
         
         # Process in background
@@ -188,7 +190,8 @@ async def convert_pptx(
         return ConversionStatus(
             task_id=task_id,
             status="processing",
-            message="Conversion started. Check status endpoint."
+            message="Conversion started. Check status endpoint.",
+            logs=task_status[task_id]["logs"],
         )
         
     except Exception as e:
@@ -247,7 +250,12 @@ async def process_conversion(
         
         # Convert using existing app logic
         def log_callback(message: str):
-            task_status[task_id]["message"] = message
+            entry = task_status.get(task_id)
+            if not entry:
+                return
+            entry["message"] = message
+            logs = entry.setdefault("logs", [])
+            logs.append(message)
         
         result_path = generate_script_slides(
             input_path,
@@ -269,6 +277,7 @@ async def process_conversion(
             "download_url": f"/download/{task_id}",
             "file_path": str(final_path)
         })
+        task_status[task_id].setdefault("logs", []).append("Conversion completed successfully!")
         
     except Exception as e:
         # Update status with error
@@ -277,6 +286,7 @@ async def process_conversion(
             "message": f"Conversion failed: {str(e)}",
             "download_url": None
         })
+        task_status[task_id].setdefault("logs", []).append(f"Conversion failed: {str(e)}")
     finally:
         # Force garbage collection to free memory
         force_garbage_collection()
