@@ -559,9 +559,15 @@ def convert_pptx():
     if not file_storage.filename:
         return jsonify({"detail": "No file selected"}), 400
 
-    filename = secure_filename(file_storage.filename)
-    if not filename or not filename.lower().endswith(".pptx"):
+    # Check original filename first
+    original_filename = file_storage.filename
+    if not original_filename.lower().endswith(".pptx"):
         return jsonify({"detail": "Only .pptx files are supported"}), 400
+    
+    # Then sanitize for safe storage
+    filename = secure_filename(original_filename)
+    if not filename:
+        filename = "uploaded.pptx"
 
     task_id = str(uuid.uuid4())
     temp_dir = Path(tempfile.mkdtemp(prefix=f"pptx_{task_id}_"))
