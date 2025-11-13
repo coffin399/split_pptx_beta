@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import re
@@ -63,6 +64,13 @@ from pptx.enum.dml import MSO_FILL
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Cm, Pt
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+LOGGER = logging.getLogger("pptx_script")
 
 MAX_CHARS_PER_SLIDE = 200
 OUTPUT_FILENAME = "スクリプトスライド_自動生成.pptx"
@@ -316,7 +324,7 @@ def speaker_color(speaker: Optional[str]) -> RGBColor:
 
 
 def log(message: str, reporter: Optional[Callable[[str], None]]) -> None:
-    print(message)
+    LOGGER.info(message)
     if reporter:
         reporter(message)
 
