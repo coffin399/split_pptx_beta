@@ -43,6 +43,10 @@ jobs:
     - name: PPTXファイルをダウンロード
       run: |
         curl -L "${{ github.event.inputs.file_url }}" -o uploads/input.pptx
+        if [ ! -s uploads/input.pptx ]; then
+          echo "❌ PPTXファイルをダウンロードできませんでした。URLが正しいか、公開アクセス可能か確認してください。"
+          exit 1
+        fi
         
     - name: PowerPointを変換
       env:
