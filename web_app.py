@@ -175,7 +175,7 @@ async def convert_pptx(
             "message": "Conversion started...",
             "download_url": None,
             "created_at": time.time(),
-            "logs": ["Conversion started..."]
+            "logs": [f"{time.strftime('%Y-%m-%d %H:%M:%S')} Conversion started..."]
         }
         
         # Process in background
@@ -255,7 +255,7 @@ async def process_conversion(
                 return
             entry["message"] = message
             logs = entry.setdefault("logs", [])
-            logs.append(message)
+            logs.append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}")
         
         result_path = generate_script_slides(
             input_path,
@@ -277,7 +277,9 @@ async def process_conversion(
             "download_url": f"/download/{task_id}",
             "file_path": str(final_path)
         })
-        task_status[task_id].setdefault("logs", []).append("Conversion completed successfully!")
+        task_status[task_id].setdefault("logs", []).append(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} Conversion completed successfully!"
+        )
         
     except Exception as e:
         # Update status with error
@@ -286,7 +288,9 @@ async def process_conversion(
             "message": f"Conversion failed: {str(e)}",
             "download_url": None
         })
-        task_status[task_id].setdefault("logs", []).append(f"Conversion failed: {str(e)}")
+        task_status[task_id].setdefault("logs", []).append(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} Conversion failed: {str(e)}"
+        )
     finally:
         # Force garbage collection to free memory
         force_garbage_collection()

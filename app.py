@@ -320,6 +320,7 @@ def speaker_color(speaker: Optional[str]) -> RGBColor:
 
 
 def log(message: str, reporter: Optional[Callable[[str], None]]) -> None:
+    print(message)
     LOGGER.info(message)
     if reporter:
         reporter(message)
