@@ -1,0 +1,88 @@
+name: PowerPoint Converter
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: 'PPTX file URL (must be publicly accessible)'
+        required: true
+        type: string
+      dpi:
+        description: 'DPI for thumbnails (50-150)'
+        required: false
+        default: '100'
+        type: string
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libreoffice poppler-utils fonts-noto-cjk
+        
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements_web.txt
+        
+    - name: Create directories
+      run: |
+        mkdir -p uploads temp output
+        
+    - name: Download PPTX file
+      run: |
+        curl -L "${{ github.event.inputs.file_url }}" -o uploads/input.pptx
+        
+    - name: Convert PowerPoint
+      env:
+        DPI: ${{ github.event.inputs.dpi }}
+      run: |
+        python3 -c "
+import os
+import sys
+sys.path.append('.')
+from app import generate_script_slides
+from pathlib import Path
+
+# Set DPI from input
+os.environ['THUMBNAIL_DPI'] = os.getenv('DPI', '100')
+
+# Convert file
+input_path = Path('uploads/input.pptx')
+output_path = generate_script_slides(input_path, Path('temp'))
+print(f'Output: {output_path}')
+
+# Copy to output directory
+import shutil
+shutil.copy2(output_path, 'output/converted.pptx')
+print('Conversion completed successfully!')
+"
+        
+    - name: Upload result
+      uses: actions/upload-artifact@v3
+      with:
+        name: converted-presentation
+        path: output/
+        retention-days: 7
+        
+    - name: Create download link
+      run: |
+        echo "## 📥 Download Ready" >> $GITHUB_STEP_SUMMARY
+        echo "Your converted file is ready for download!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "1. Go to the **Actions** tab in this repository" >> $GITHUB_STEP_SUMMARY
+        echo "2. Click on this workflow run" >> $GITHUB_STEP_SUMMARY
+        echo "3. Download the **converted-presentation** artifact" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⏰ The file will be available for 7 days" >> $GITHUB_STEP_SUMMARY
