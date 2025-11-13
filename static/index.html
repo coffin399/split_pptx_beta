@@ -35,6 +35,9 @@
         .download-btn:hover { background: #1e7e34; }
         .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #007bff; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .log-card { background: #1e1e1e; color: #fafafa; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 12px; padding: 16px; border-radius: 10px; max-height: 200px; overflow-y: auto; margin-top: 16px; white-space: pre-wrap; }
+        .log-entry { margin-bottom: 6px; opacity: 0.85; }
+        .log-entry:last-child { margin-bottom: 0; opacity: 1; }
     </style>
 </head>
 <body>
@@ -101,6 +104,7 @@
                     status: null,
                     taskId: null,
                     progressWidth: 0,
+                    logs: [],
                     pollingInterval: null
                 };
             },
@@ -113,6 +117,7 @@
                     if (file && file.name.toLowerCase().endsWith('.pptx')) {
                         this.selectedFile = file;
                         this.status = null;
+                        this.logs = [];
                     } else {
                         alert('PPTXファイルを選択してください');
                     }
@@ -123,9 +128,19 @@
                     if (file && file.name.toLowerCase().endsWith('.pptx')) {
                         this.selectedFile = file;
                         this.status = null;
+                        this.logs = [];
                     } else {
                         alert('PPTXファイルをドロップしてください');
                     }
+                },
+                addLog(message) {
+                    if (!message) return;
+                    const timestamp = new Date().toLocaleTimeString();
+                    const formatted = `[${timestamp}] ${message}`;
+                    if (this.logs[this.logs.length - 1] !== formatted) {
+                        this.logs.push(formatted);
+                    }
+                    console.info('UI LOG:', message);
                 },
                 async uploadFile() {
                     if (!this.selectedFile) return;
@@ -133,6 +148,8 @@
                     this.isProcessing = true;
                     this.status = null;
                     this.progressWidth = 0;
+                    this.logs = [];
+                    this.addLog(`ファイル「${this.selectedFile.name}」のアップロードを開始しました`);
 
                     const formData = new FormData();
                     formData.append('file', this.selectedFile);
@@ -152,6 +169,7 @@
 
                         this.taskId = response.data.task_id;
                         this.status = response.data;
+                        this.addLog(this.status.message || '変換を開始しました');
                         this.startPolling();
                     } catch (error) {
                         console.error('Upload error:', error);
@@ -162,6 +180,7 @@
                                 ? 'アップロードがタイムアウトまたは中断されました。ネットワーク状況を確認し再試行してください。'
                                 : error.response?.data?.detail || 'アップロードに失敗しました'
                         };
+                        this.addLog(this.status.message);
                         this.isProcessing = false;
                     }
                 },
@@ -170,6 +189,7 @@
                         try {
                             const response = await axios.get(`/status/${this.taskId}`);
                             this.status = response.data;
+                            this.addLog(this.status.message);
                             
                             // Update progress (simulated)
                             if (this.status.status === 'processing') {
@@ -188,6 +208,7 @@
                             console.error('Status polling error:', error);
                             clearInterval(this.pollingInterval);
                             this.isProcessing = false;
+                            this.addLog('ステータス取得に失敗しました: ' + (error.response?.data?.detail || error.message));
                         }
                     }, 2000);
                 },
@@ -220,5 +241,13 @@
             }
         }).mount('#app');
     </script>
+    <div v-if="logs.length" class="container">
+        <div class="card">
+            <h2 style="margin-bottom: 12px; font-size: 18px; color: #333;">ログ</h2>
+            <div class="log-card">
+                <div v-for="(entry, index) in logs" :key="index" class="log-entry">{{ entry }}</div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
