@@ -889,45 +889,52 @@ def _export_thumbnails_via_pdf(
     image_output_dir = persistent_dir / "pdf_images"
     image_output_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        image_paths = convert_from_path(
-            str(pdf_path),
-            dpi=optimal_dpi,  # Use optimal DPI instead of DEFAULT_THUMBNAIL_DPI
-            poppler_path=poppler_path,
-            fmt="png",
-            output_folder=str(image_output_dir),
-            output_file="slide",
-            paths_only=True,
-            # Additional parameters for better font handling and memory efficiency
-            thread_count=1,  # Single thread to reduce memory usage
-            use_pdftocairo=True,
-        )
-    except Exception as exc:
-        log(
-            f"PDF からの画像変換に失敗しました: {exc}. 別の方法にフォールバックします。",
-            reporter,
-        )
-        shutil.rmtree(image_output_dir, ignore_errors=True)
-        return []
-
-    if len(image_paths) != slide_count:
-        log(
-            f"PDF から生成されたページ数 ({len(image_paths)}) がスライド数 ({slide_count}) と一致しません。",
-            reporter,
-        )
-        shutil.rmtree(image_output_dir, ignore_errors=True)
-        return []
-
     exports: List[Path] = []
-    for idx, image_path in enumerate(sorted(image_paths), start=1):
-        src = Path(image_path)
-        dest = persistent_dir / f"slide_{idx:03d}.png"
+    batch_size = 15 if slide_count > 120 else 25 if slide_count > 60 else 40
+
+    for batch_start in range(1, slide_count + 1, batch_size):
+        batch_end = min(batch_start + batch_size - 1, slide_count)
         try:
-            shutil.move(str(src), dest)
+            batch_paths = convert_from_path(
+                str(pdf_path),
+                dpi=optimal_dpi,
+                poppler_path=poppler_path,
+                fmt="png",
+                output_folder=str(image_output_dir),
+                output_file=f"slide_{batch_start:03d}",
+                paths_only=True,
+                first_page=batch_start,
+                last_page=batch_end,
+                thread_count=1,
+                use_pdftocairo=True,
+            )
         except Exception as exc:
-            log(f"画像 {idx} の保存に失敗しました: {exc}", reporter)
-            continue
-        exports.append(dest)
+            log(
+                f"PDF からの画像変換 (ページ {batch_start}-{batch_end}) に失敗しました: {exc}。別の方法にフォールバックします。",
+                reporter,
+            )
+            shutil.rmtree(image_output_dir, ignore_errors=True)
+            return []
+
+        expected_count = batch_end - batch_start + 1
+        if len(batch_paths) != expected_count:
+            log(
+                f"PDF から生成されたページ数 ({len(batch_paths)}) が期待値 ({expected_count}) と一致しません (ページ {batch_start}-{batch_end})。",
+                reporter,
+            )
+            shutil.rmtree(image_output_dir, ignore_errors=True)
+            return []
+
+        for offset, image_path in enumerate(sorted(batch_paths), start=0):
+            slide_index = batch_start + offset
+            src = Path(image_path)
+            dest = persistent_dir / f"slide_{slide_index:03d}.png"
+            try:
+                shutil.move(str(src), dest)
+            except Exception as exc:
+                log(f"画像 {slide_index} の保存に失敗しました: {exc}", reporter)
+                continue
+            exports.append(dest)
 
     shutil.rmtree(image_output_dir, ignore_errors=True)
 

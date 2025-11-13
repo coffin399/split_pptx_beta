@@ -213,19 +213,41 @@
                         this.startPolling();
                     } catch (error) {
                         console.error('Upload error:', error);
+                        const statusCode = error.response?.status;
+                        const serverDetail = error.response?.data?.detail;
                         const isTimeout = error.code === 'ECONNABORTED';
-                        if (isTimeout && this.uploadAttempts < 2) {
-                            this.addLog('アップロードがタイムアウトしました。サーバー起動の遅延とみなし再試行します...');
+                        const isGatewayError = statusCode === 502 || statusCode === 504;
+
+                        if ((isTimeout || isGatewayError) && this.uploadAttempts < 3) {
+                            this.addLog(
+                                isGatewayError
+                                    ? 'サーバーとの通信が一時的に失敗しました。再試行します...'
+                                    : 'アップロードがタイムアウトしました。サーバー起動の遅延とみなし再試行します...'
+                            );
                             await this.sleep(3000);
                             return this.uploadFile(true);
                         }
+
+                        let message = '';
+                        if (statusCode === 413) {
+                            message = 'ファイルサイズが制限を超えています。分割するかサイズを小さくしてください。';
+                        } else if (statusCode === 503) {
+                            message = serverDetail || 'サーバーが混雑しています。しばらく待ってから再試行してください。';
+                        } else if (isGatewayError) {
+                            message = 'サーバーとの通信でエラーが発生しました。時間をおいて再試行してください。';
+                        } else if (isTimeout) {
+                            message = 'アップロードがタイムアウトまたは中断されました。ネットワーク状況を確認し再試行してください。';
+                        } else if (serverDetail) {
+                            message = serverDetail;
+                        } else {
+                            message = 'アップロードに失敗しました';
+                        }
+
                         this.status = {
                             status: 'error',
-                            message: isTimeout
-                                ? 'アップロードがタイムアウトまたは中断されました。ネットワーク状況を確認し再試行してください。'
-                                : error.response?.data?.detail || 'アップロードに失敗しました'
+                            message
                         };
-                        this.addLog(this.status.message);
+                        this.addLog(message);
                         this.isProcessing = false;
                     }
                 },
