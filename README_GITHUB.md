@@ -6,6 +6,7 @@
 
 ### 1. PPTXファイルをアップロード
 PPTXファイルをファイル共有サービス（Google Drive、Dropbox等）にアップロードし、公開ダウンロードURLを取得します。
+Googleスライドの場合は、共有リンク（`https://docs.google.com/presentation/d/.../edit` など）をそのまま指定すれば、自動的に PPTX ダウンロードリンクへ変換されます。
 
 ### 2. ワークフローを実行
 1. リポジトリの **Actions** タブに移動

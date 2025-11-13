@@ -42,7 +42,22 @@ jobs:
         
     - name: PPTXファイルをダウンロード
       run: |
-        curl -L "${{ github.event.inputs.file_url }}" -o uploads/input.pptx
+        DOWNLOAD_URL="${{ github.event.inputs.file_url }}"
+
+        # Google Slides の共有URLに対応（/presentation/d/<ID>/edit 形式）
+        if echo "$DOWNLOAD_URL" | grep -q "docs.google.com/presentation"; then
+          echo "Google Slides のダウンロードリンクを変換しています..."
+          SLIDE_ID=$(echo "$DOWNLOAD_URL" | sed -n 's#.*/presentation/d/\([^/]*\)/.*#\1#p')
+          if [ -n "$SLIDE_ID" ]; then
+            DOWNLOAD_URL="https://docs.google.com/presentation/d/$SLIDE_ID/export/pptx"
+            echo "変換後のURL: $DOWNLOAD_URL"
+          else
+            echo "❌ Google Slides のURLからIDを抽出できませんでした。共有リンク形式を確認してください。"
+            exit 1
+          fi
+        fi
+
+        curl -L "$DOWNLOAD_URL" -o uploads/input.pptx
         if [ ! -s uploads/input.pptx ]; then
           echo "❌ PPTXファイルをダウンロードできませんでした。URLが正しいか、公開アクセス可能か確認してください。"
           exit 1
