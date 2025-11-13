@@ -819,6 +819,47 @@ def _export_with_powerpoint_macos(
     return exported
 
 
+def get_libreoffice_path() -> str:
+    """Get LibreOffice executable path for different platforms."""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        # Check common macOS locations
+        paths = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/Applications/LibreOffice.app/Contents/MacOS/LibreOffice",
+            os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+            "/opt/homebrew/bin/soffice",
+            "/usr/local/bin/soffice",
+        ]
+    elif system == "Windows":
+        # Check common Windows locations
+        paths = [
+            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+            "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+            "C:\\Program Files\\LibreOffice\\program\\LibreOffice.exe",
+            "C:\\Program Files (x86)\\LibreOffice\\program\\LibreOffice.exe",
+        ]
+    else:  # Linux
+        paths = [
+            "/usr/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/opt/libreoffice/program/soffice",
+        ]
+    
+    # Check if soffice/libreoffice is in PATH
+    for cmd in ["soffice", "libreoffice"]:
+        if shutil.which(cmd):
+            return cmd
+    
+    # Check specific paths
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+
 def _export_thumbnails_via_libreoffice_png(
     pptx_path: Path,
     slide_count: int,
@@ -830,12 +871,13 @@ def _export_thumbnails_via_libreoffice_png(
     optimal_dpi = get_optimal_dpi(slide_count)
     log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (LibreOffice直接PNG変換)", reporter)
 
-    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
+    soffice = get_libreoffice_path()
     if not soffice:
         log(
             "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成にフォールバックします。",
             reporter,
         )
+        log("インストールガイド: https://www.libreoffice.org/download/download-libreoffice/", reporter)
         return _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
 
     try:
@@ -847,7 +889,8 @@ def _export_thumbnails_via_libreoffice_png(
         
         log("LibreOffice で直接 PNG 変換を開始します...", reporter)
         
-        result = subprocess.run(
+        # Use Popen for real-time output capture
+        process = subprocess.Popen(
             [
                 "soffice",
                 "--headless",
@@ -857,16 +900,27 @@ def _export_thumbnails_via_libreoffice_png(
                 str(persistent_dir),
                 str(pptx_path),
             ],
-            check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             env=env,
-            timeout=300,  # 5 minute timeout
         )
+        
+        # Monitor process in real-time
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                log(f"LibreOffice: {output.strip()}", reporter)
+        
+        # Check final result
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, process.args)
         
         log("LibreOffice PNG 変換が完了しました", reporter)
         
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         log(
             f"LibreOffice での PNG 変換に失敗しました: {exc}. PDF経由にフォールバックします。",
             reporter,
