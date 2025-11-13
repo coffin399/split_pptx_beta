@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import platform
@@ -875,17 +876,11 @@ def _export_thumbnails_via_pdf(
 
     poppler_path = os.getenv("POPPLER_PATH") or None
     
-    # Update font cache for better Japanese font detection
-    try:
-        subprocess.run(["fc-cache", "-fv"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass  # Font cache update is optional
-    
     image_output_dir = persistent_dir / "pdf_images"
     image_output_dir.mkdir(parents=True, exist_ok=True)
 
     exports: List[Path] = []
-    batch_size = 15 if slide_count > 120 else 25 if slide_count > 60 else 40
+    batch_size = 5 if slide_count > 120 else 8 if slide_count > 60 else 12 if slide_count > 30 else 20
 
     for batch_start in range(1, slide_count + 1, batch_size):
         batch_end = min(batch_start + batch_size - 1, slide_count)
@@ -939,6 +934,8 @@ def _export_thumbnails_via_pdf(
             f"PDF バッチ変換完了: ページ {batch_start}-{batch_end} -> {len(batch_paths)} 枚", 
             reporter,
         )
+
+        gc.collect()
 
     shutil.rmtree(image_output_dir, ignore_errors=True)
 
