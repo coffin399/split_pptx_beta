@@ -894,6 +894,10 @@ def _export_thumbnails_via_pdf(
 
     for batch_start in range(1, slide_count + 1, batch_size):
         batch_end = min(batch_start + batch_size - 1, slide_count)
+        log(
+            f"PDF バッチ変換開始: ページ {batch_start}-{batch_end} (全 {slide_count} ページ)",
+            reporter,
+        )
         try:
             batch_paths = convert_from_path(
                 str(pdf_path),
@@ -935,6 +939,11 @@ def _export_thumbnails_via_pdf(
                 log(f"画像 {slide_index} の保存に失敗しました: {exc}", reporter)
                 continue
             exports.append(dest)
+
+        log(
+            f"PDF バッチ変換完了: ページ {batch_start}-{batch_end} -> {len(batch_paths)} 枚", 
+            reporter,
+        )
 
     shutil.rmtree(image_output_dir, ignore_errors=True)
 
@@ -1108,6 +1117,10 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
             thumbnail_geometry = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
 
             for part_idx, chunk in enumerate(chunks, start=1):
+                log(
+                    f"スライド {slide_index}/{len(prs.slides)} - パート {part_idx}/{len(chunks)} を生成中", 
+                    reporter,
+                )
                 new_slide = output_prs.slides.add_slide(blank_layout)
                 apply_background(new_slide)
                 thumbnail_path = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
