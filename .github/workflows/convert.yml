@@ -48,13 +48,15 @@ jobs:
       env:
         DPI: ${{ github.event.inputs.dpi }}
       run: |
-        python3 -c "
+        python3 <<'PY'
         import os
         import sys
+        import time
+        import shutil
+        from pathlib import Path
+
         sys.path.append('.')
         from app import generate_script_slides
-        from pathlib import Path
-        import time
 
         # Set DPI from input
         os.environ['THUMBNAIL_DPI'] = os.getenv('DPI', '100')
@@ -66,13 +68,12 @@ jobs:
         # Convert file
         input_path = Path('uploads/input.pptx')
         output_path = generate_script_slides(input_path, Path('temp'), reporter)
-        print(f'Output: {output_path}')
+        print(f"Output: {output_path}")
 
         # Copy to output directory
-        import shutil
         shutil.copy2(output_path, 'output/converted.pptx')
         print('Conversion completed successfully!')
-        "
+        PY
         
     - name: 結果ファイルをアップロード
       uses: actions/upload-artifact@v4
