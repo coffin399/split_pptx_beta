@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional, Tuple
 
 
 @dataclass
@@ -277,8 +277,11 @@ def build_segments(notes_text: str, max_chars: int) -> List[Segment]:
             segments.append(Segment(content, speaker_label))
             continue
         for idx, part in enumerate(line_segments):
-            display_text = part if idx > 0 or not speaker_label else f"{speaker_label}：{part}"
-            segments.append(Segment(display_text, speaker_label))
+            if idx == 0 and speaker_label:
+                display_text = f"{speaker_label}：{part}"
+            else:
+                display_text = part
+            segments.append(Segment(display_text, speaker_label if idx == 0 else None))
     return segments
 
 
@@ -535,12 +538,32 @@ def apply_background(slide) -> None:
     fill.fore_color.rgb = RGBColor(0x00, 0x00, 0x00)
 
 
-def add_textbox(slide, chunk: List[Segment]) -> None:
+def add_textbox(
+    slide,
+    chunk: List[Segment],
+    slide_width,
+    slide_height,
+    thumbnail_geometry: Optional[Tuple[float, float, float, float]] = None,
+) -> None:
+    left = TEXTBOX_POSITION["left"]
+    top = TEXTBOX_POSITION["top"]
+    if thumbnail_geometry:
+        thumb_left, _, _, _ = thumbnail_geometry
+        right_boundary = thumb_left - Cm(THUMBNAIL_MARGIN_CM)
+        available_width = max(Cm(6), right_boundary - left)
+    else:
+        right_margin = Cm(THUMBNAIL_MARGIN_CM)
+        available_width = max(Cm(10), slide_width - left - right_margin)
+    available_height = max(
+        Cm(5),
+        slide_height - top - Cm(THUMBNAIL_MARGIN_CM + 0.5),
+    )
+
     textbox = slide.shapes.add_textbox(
-        TEXTBOX_POSITION["left"],
-        TEXTBOX_POSITION["top"],
-        TEXTBOX_POSITION["width"],
-        TEXTBOX_POSITION["height"],
+        left,
+        top,
+        available_width,
+        available_height,
     )
     text_frame = textbox.text_frame
     text_frame.text = ""
@@ -554,28 +577,46 @@ def add_textbox(slide, chunk: List[Segment]) -> None:
 
     for idx, segment in enumerate(chunk):
         paragraph = text_frame.paragraphs[0] if idx == 0 else text_frame.add_paragraph()
-        paragraph.text = segment.text
+        paragraph.clear()
+        run = paragraph.add_run()
+        run.text = segment.text
         paragraph.alignment = PP_ALIGN.LEFT
         paragraph.space_after = Pt(12)  # Add spacing between paragraphs
         paragraph.space_before = Pt(0)
-        font = paragraph.font
+        font = run.font
         font.name = FONT_NAME
         font.size = Pt(FONT_SIZE_PT)
         font.bold = FONT_BOLD
         font.color.rgb = speaker_color(segment.speaker)
 
 
-def add_page_indicator(slide, index: int, total: int, slide_width, slide_height) -> None:
+def add_page_indicator(
+    slide,
+    index: int,
+    total: int,
+    slide_width,
+    slide_height,
+    thumbnail_geometry: Optional[Tuple[float, float, float, float]] = None,
+) -> None:
     if total <= 1:
         return
     # Position page indicator above thumbnail
     margin = Cm(0.1)
-    thumbnail_height = Cm(THUMBNAIL_WIDTH_CM * 9/16)  # Assuming 16:9 aspect ratio
     indicator_width = Cm(4)
     indicator_height = Cm(1.5)
+
+    if thumbnail_geometry:
+        thumb_left, thumb_top, thumb_width, thumb_height = thumbnail_geometry
+        indicator_left = max(margin, thumb_left - indicator_width - margin)
+        indicator_top = thumb_top + max(0, (thumb_height - indicator_height) / 2)
+    else:
+        thumbnail_height = Cm(THUMBNAIL_WIDTH_CM * 9/16)  # Assuming 16:9 aspect ratio
+        indicator_left = slide_width - indicator_width - margin
+        indicator_top = slide_height - thumbnail_height - indicator_height - Cm(0.5)
+
     textbox = slide.shapes.add_textbox(
-        slide_width - indicator_width - margin,
-        slide_height - thumbnail_height - indicator_height - Cm(0.5),
+        indicator_left,
+        indicator_top,
         indicator_width,
         indicator_height,
     )
@@ -593,9 +634,14 @@ def add_page_indicator(slide, index: int, total: int, slide_width, slide_height)
     font.color.rgb = PAGE_INDICATOR_COLOR
 
 
-def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
+def add_thumbnail(
+    slide,
+    image_path: Path,
+    slide_width,
+    slide_height,
+) -> Optional[Tuple[float, float, float, float]]:
     if not image_path.exists():
-        return
+        return None
     margin = Cm(0.1)  # Minimal margin for tight positioning
     img = None
     try:
@@ -604,7 +650,7 @@ def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
         height_cm = width_cm * img.height / img.width
     except Exception as exc:
         log(f"サムネイル画像の読み込みに失敗しました: {exc}", None)
-        return
+        return None
     finally:
         if img is not None:
             try:
@@ -618,6 +664,7 @@ def add_thumbnail(slide, image_path: Path, slide_width, slide_height) -> None:
     left = slide_width - width - margin
     top = slide_height - height - margin
     slide.shapes.add_picture(str(image_path), left, top, width=width, height=height)
+    return (left, top, width, height)
 
 
 def create_placeholder_thumbnail(index: int, output_dir: Path) -> Path:
@@ -1043,14 +1090,24 @@ def generate_script_slides(input_file: Path, output_dir: Path, reporter: Optiona
             log(
                 f"スライド {slide_index}: {len(segments)} セグメント -> {len(chunks)} 枚に分割", reporter
             )
+            thumbnail_geometry = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
+
             for part_idx, chunk in enumerate(chunks, start=1):
                 new_slide = output_prs.slides.add_slide(blank_layout)
                 apply_background(new_slide)
-                add_textbox(new_slide, chunk)
-                add_page_indicator(new_slide, part_idx, len(chunks), output_prs.slide_width, output_prs.slide_height)
                 thumbnail_path = thumbnails[slide_index - 1] if slide_index - 1 < len(thumbnails) else None
+                thumbnail_geom = None
                 if thumbnail_path:
-                    add_thumbnail(new_slide, thumbnail_path, output_prs.slide_width, output_prs.slide_height)
+                    thumbnail_geom = add_thumbnail(new_slide, thumbnail_path, output_prs.slide_width, output_prs.slide_height)
+                add_textbox(new_slide, chunk, output_prs.slide_width, output_prs.slide_height, thumbnail_geom)
+                add_page_indicator(
+                    new_slide,
+                    part_idx,
+                    len(chunks),
+                    output_prs.slide_width,
+                    output_prs.slide_height,
+                    thumbnail_geom,
+                )
                 created += 1
 
         if created == 0:
