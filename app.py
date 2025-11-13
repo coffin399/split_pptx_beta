@@ -560,7 +560,7 @@ def convert_pptx():
         return jsonify({"detail": "No file selected"}), 400
 
     filename = secure_filename(file_storage.filename)
-    if not filename.lower().endswith(".pptx"):
+    if not filename or not filename.lower().endswith(".pptx"):
         return jsonify({"detail": "Only .pptx files are supported"}), 400
 
     task_id = str(uuid.uuid4())
