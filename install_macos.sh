@@ -24,10 +24,15 @@ echo "4. Cleaning up..."
 hdiutil detach "/Volumes/LibreOffice"
 rm LibreOffice.dmg
 
-# Gatekeeper bypass (for unsigned apps)
+# Gatekeeper bypass (safe approach - no system changes)
 echo "5. Adjusting security settings..."
-sudo spctl --master-disable
-xattr -d com.apple.quarantine "/Applications/LibreOffice.app" 2>/dev/null || true
+
+# Remove quarantine from LibreOffice app only
+sudo xattr -d com.apple.quarantine "/Applications/LibreOffice.app" 2>/dev/null || true
+sudo xattr -d com.apple.quarantine "/Applications/LibreOffice.app/Contents/MacOS/soffice" 2>/dev/null || true
+sudo xattr -d com.apple.quarantine "/Applications/LibreOffice.app/Contents/MacOS/LibreOffice" 2>/dev/null || true
+
+echo "Note: First launch may show security prompt. Click 'Open' in the dialog."
 
 # Install Python dependencies
 echo "6. Installing Python dependencies..."
