@@ -1,14 +1,14 @@
-name: PowerPoint Converter
+name: PowerPoint 変換ワークフロー
 
 on:
   workflow_dispatch:
     inputs:
       file_url:
-        description: 'PPTX file URL (must be publicly accessible)'
+        description: 'PPTXファイルのダウンロードURL（公開アクセス可能なもの）'
         required: true
         type: string
       dpi:
-        description: 'DPI for thumbnails (50-150)'
+        description: 'サムネイル用DPI（50-150）'
         required: false
         default: '100'
         type: string
@@ -19,32 +19,32 @@ jobs:
     timeout-minutes: 30
     
     steps:
-    - name: Checkout code
+    - name: リポジトリをチェックアウト
       uses: actions/checkout@v4
       
-    - name: Set up Python
+    - name: Python環境をセットアップ
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: Install system dependencies
+    - name: システム依存関係をインストール
       run: |
         sudo apt-get update
         sudo apt-get install -y libreoffice poppler-utils fonts-noto-cjk
         
-    - name: Install Python dependencies
+    - name: Python依存関係をインストール
       run: |
         pip install -r requirements_web.txt
         
-    - name: Create directories
+    - name: 作業ディレクトリを作成
       run: |
         mkdir -p uploads temp output
         
-    - name: Download PPTX file
+    - name: PPTXファイルをダウンロード
       run: |
         curl -L "${{ github.event.inputs.file_url }}" -o uploads/input.pptx
         
-    - name: Convert PowerPoint
+    - name: PowerPointを変換
       env:
         DPI: ${{ github.event.inputs.dpi }}
       run: |
@@ -69,20 +69,20 @@ shutil.copy2(output_path, 'output/converted.pptx')
 print('Conversion completed successfully!')
 "
         
-    - name: Upload result
+    - name: 結果ファイルをアップロード
       uses: actions/upload-artifact@v3
       with:
-        name: converted-presentation
+        name: 変換済みプレゼンテーション
         path: output/
-        retention-days: 7
+        retention-days: 1
         
-    - name: Create download link
+    - name: ダウンロード案内を作成
       run: |
-        echo "## 📥 Download Ready" >> $GITHUB_STEP_SUMMARY
-        echo "Your converted file is ready for download!" >> $GITHUB_STEP_SUMMARY
+        echo "## 📥 ダウンロード準備完了" >> $GITHUB_STEP_SUMMARY
+        echo "変換済みファイルのダウンロードが可能になりました。" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "1. Go to the **Actions** tab in this repository" >> $GITHUB_STEP_SUMMARY
-        echo "2. Click on this workflow run" >> $GITHUB_STEP_SUMMARY
-        echo "3. Download the **converted-presentation** artifact" >> $GITHUB_STEP_SUMMARY
+        echo "1. このリポジトリの **Actions** タブを開きます" >> $GITHUB_STEP_SUMMARY
+        echo "2. 今回のワークフロー実行をクリックします" >> $GITHUB_STEP_SUMMARY
+        echo "3. **変換済みプレゼンテーション** アーティファクトをダウンロードします" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "⏰ The file will be available for 7 days" >> $GITHUB_STEP_SUMMARY
+        echo "⏰ ファイルは1日間ダウンロード可能です" >> $GITHUB_STEP_SUMMARY
