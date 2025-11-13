@@ -112,7 +112,8 @@
                     taskId: null,
                     progressWidth: 0,
                     logs: [],
-                    pollingInterval: null
+                    pollingInterval: null,
+                    uploadAttempts: 0
                 };
             },
             methods: {
@@ -149,19 +150,51 @@
                     }
                     console.info('UI LOG:', message);
                 },
-                async uploadFile() {
+                sleep(ms) {
+                    return new Promise(resolve => setTimeout(resolve, ms));
+                },
+                async ensureServerReady(maxAttempts = 3) {
+                    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                        try {
+                            if (attempt === 1) {
+                                this.addLog('サーバーの状態を確認しています...');
+                            } else {
+                                this.addLog(`サーバーの起動を待機中... (${attempt}/${maxAttempts})`);
+                            }
+                            await axios.get('/health', { timeout: 15000 });
+                            this.addLog('サーバーはオンラインです。');
+                            return true;
+                        } catch (error) {
+                            console.warn('Health check failed', error);
+                            if (attempt === maxAttempts) {
+                                this.addLog('サーバーから応答がありません。後ほど再試行してください。');
+                                throw error;
+                            }
+                            await this.sleep(3000);
+                        }
+                    }
+                    return false;
+                },
+                async uploadFile(retry = false) {
                     if (!this.selectedFile) return;
 
+                    if (!retry) {
+                        this.logs = [];
+                        this.progressWidth = 0;
+                        this.uploadAttempts = 0;
+                        this.addLog(`ファイル「${this.selectedFile.name}」のアップロードを開始しました`);
+                    }
+
+                    this.uploadAttempts += 1;
                     this.isProcessing = true;
                     this.status = null;
-                    this.progressWidth = 0;
-                    this.logs = [];
-                    this.addLog(`ファイル「${this.selectedFile.name}」のアップロードを開始しました`);
 
                     const formData = new FormData();
                     formData.append('file', this.selectedFile);
 
                     try {
+                        await this.ensureServerReady();
+
                         const response = await axios.post('/convert', formData, {
                             headers: {
                                 'Content-Type': 'multipart/form-data'
@@ -181,6 +214,11 @@
                     } catch (error) {
                         console.error('Upload error:', error);
                         const isTimeout = error.code === 'ECONNABORTED';
+                        if (isTimeout && this.uploadAttempts < 2) {
+                            this.addLog('アップロードがタイムアウトしました。サーバー起動の遅延とみなし再試行します...');
+                            await this.sleep(3000);
+                            return this.uploadFile(true);
+                        }
                         this.status = {
                             status: 'error',
                             message: isTimeout
