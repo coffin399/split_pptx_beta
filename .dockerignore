@@ -30,10 +30,9 @@ build/
 *.egg-info/
 
 # Documentation
-README.md
 *.md
 
-# Scripts (except web app)
+# Scripts (removed)
 scripts/
 
 # Temporary files
