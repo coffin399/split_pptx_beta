@@ -54,13 +54,18 @@ jobs:
         sys.path.append('.')
         from app import generate_script_slides
         from pathlib import Path
+        import time
 
         # Set DPI from input
         os.environ['THUMBNAIL_DPI'] = os.getenv('DPI', '100')
 
+        def reporter(message: str) -> None:
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{timestamp}] {message}")
+
         # Convert file
         input_path = Path('uploads/input.pptx')
-        output_path = generate_script_slides(input_path, Path('temp'))
+        output_path = generate_script_slides(input_path, Path('temp'), reporter)
         print(f'Output: {output_path}')
 
         # Copy to output directory
