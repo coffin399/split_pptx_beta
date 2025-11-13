@@ -126,14 +126,9 @@ def clear_font_cache() -> None:
 
 def get_optimal_dpi(slide_count: int) -> int:
     """Get optimal DPI based on slide count to balance quality and memory usage."""
-    if slide_count > 100:  # Very large presentations - ultra low memory
-        return 80
-    elif slide_count > 50:  # Large presentations
-        return LOW_MEMORY_DPI
-    elif slide_count > 20:  # Medium presentations
-        return 120  # Medium DPI
-    else:  # Small presentations
-        return DEFAULT_THUMBNAIL_DPI
+    # Force a low DPI to minimize memory usage even for small decks.
+    # Visual fidelity remains acceptable for thumbnails while keeping PDF conversion lightweight.
+    return 50
 
 
 def get_font(size_pt: float) -> ImageFont.ImageFont:
