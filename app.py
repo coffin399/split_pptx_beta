@@ -819,6 +819,97 @@ def _export_with_powerpoint_macos(
     return exported
 
 
+def _export_thumbnails_via_libreoffice_png(
+    pptx_path: Path,
+    slide_count: int,
+    persistent_dir: Path,
+    reporter: Optional[Callable[[str], None]],
+) -> List[Path]:
+    """Export thumbnails directly via LibreOffice PNG conversion with memory optimization."""
+    # Use optimal DPI based on slide count
+    optimal_dpi = get_optimal_dpi(slide_count)
+    log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (LibreOffice直接PNG変換)", reporter)
+
+    soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
+    if not soffice:
+        log(
+            "LibreOffice/soffice が見つかりません。PDFベースのサムネイル生成にフォールバックします。",
+            reporter,
+        )
+        return _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
+
+    try:
+        env = os.environ.copy()
+        # Limit memory usage for LibreOffice
+        env["LIBREOFFICE_USE_SYSTEM_LIBS"] = "1"
+        # Set DPI for PNG output (LibreOffice uses different parameter)
+        env["EXPORT_PNG_RESOLUTION"] = str(optimal_dpi)
+        
+        log("LibreOffice で直接 PNG 変換を開始します...", reporter)
+        
+        result = subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--convert-to",
+                "png",
+                "--outdir",
+                str(persistent_dir),
+                str(pptx_path),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            timeout=300,  # 5 minute timeout
+        )
+        
+        log("LibreOffice PNG 変換が完了しました", reporter)
+        
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        log(
+            f"LibreOffice での PNG 変換に失敗しました: {exc}. PDF経由にフォールバックします。",
+            reporter,
+        )
+        return _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
+
+    # Find generated PNG files
+    png_files = sorted(persistent_dir.glob("*.png"))
+    
+    if not png_files:
+        log("PNG 変換結果が見つかりませんでした。PDF経由にフォールバックします。", reporter)
+        return _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
+    
+    # Rename files to consistent slide_XXX.png format
+    exports: List[Path] = []
+    for i, png_file in enumerate(png_files, start=1):
+        dest = persistent_dir / f"slide_{i:03d}.png"
+        if png_file != dest:
+            try:
+                shutil.move(str(png_file), dest)
+            except Exception as exc:
+                log(f"PNG ファイルのリネームに失敗しました: {exc}", reporter)
+                continue
+        
+        if dest.exists():
+            exports.append(dest)
+            log(f"サムネイル {i}/{slide_count} を生成しました", reporter)
+    
+    # Verify we have all slides
+    if len(exports) != slide_count:
+        log(
+            f"生成されたサムネイル数 ({len(exports)}) がスライド数 ({slide_count}) と一致しません。PDF経由にフォールバックします。",
+            reporter,
+        )
+        # Cleanup partial results and fallback
+        for export in exports:
+            export.unlink(missing_ok=True)
+        return _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
+    
+    log(f"LibreOffice 直接PNG変換に成功しました。{len(exports)} 枚のサムネイルを保存しました", reporter)
+    return exports
+
+
 def _export_thumbnails_via_pdf(
     pptx_path: Path,
     slide_count: int,
@@ -832,7 +923,7 @@ def _export_thumbnails_via_pdf(
 
     # Use optimal DPI based on slide count
     optimal_dpi = get_optimal_dpi(slide_count)
-    log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (メモリ最適化)", reporter)
+    log(f"スライド数: {slide_count}, DPI: {optimal_dpi} (PDF経由メモリ最適化)", reporter)
 
     soffice = next((cmd for cmd in ("soffice", "libreoffice") if shutil.which(cmd)), None)
     if not soffice:
@@ -982,6 +1073,20 @@ def generate_thumbnails(
     
     persistent_dir = Path(tempfile.mkdtemp(prefix="pptx_thumbs_"))
 
+    # Try LibreOffice direct PNG conversion first (faster and more memory efficient)
+    png_exports = _export_thumbnails_via_libreoffice_png(pptx_path, slide_count, persistent_dir, reporter)
+    if png_exports:
+        log("LibreOffice 直接 PNG 変換でサムネイル生成に成功しました。", reporter)
+        
+        # Store in cache if available
+        if cache:
+            for idx, path in enumerate(png_exports):
+                cache.put(pptx_path, idx, optimal_dpi, path)
+            log(f"{len(png_exports)} 枚のサムネイルをキャッシュに保存しました", reporter)
+        
+        return png_exports, persistent_dir
+    
+    # Fallback to PDF-based conversion if direct PNG fails
     pdf_exports = _export_thumbnails_via_pdf(pptx_path, slide_count, persistent_dir, reporter)
     if pdf_exports:
         log("PDF を経由したサムネイル生成に成功しました。", reporter)
