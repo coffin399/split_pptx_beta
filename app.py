@@ -880,7 +880,7 @@ def _export_thumbnails_via_pdf(
     image_output_dir.mkdir(parents=True, exist_ok=True)
 
     exports: List[Path] = []
-    batch_size = 5 if slide_count > 120 else 8 if slide_count > 60 else 12 if slide_count > 30 else 20
+    batch_size = 5
 
     for batch_start in range(1, slide_count + 1, batch_size):
         batch_end = min(batch_start + batch_size - 1, slide_count)
