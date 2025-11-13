@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PowerPoint スクリプトスライド変換</title>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -141,6 +141,12 @@
                         const response = await axios.post('/convert', formData, {
                             headers: {
                                 'Content-Type': 'multipart/form-data'
+                            },
+                            timeout: 5 * 60 * 1000, // 5 minutes to tolerate large uploads
+                            onUploadProgress: (event) => {
+                                if (event.total) {
+                                    this.progressWidth = Math.min(95, Math.round((event.loaded / event.total) * 100));
+                                }
                             }
                         });
 
@@ -149,9 +155,12 @@
                         this.startPolling();
                     } catch (error) {
                         console.error('Upload error:', error);
+                        const isTimeout = error.code === 'ECONNABORTED';
                         this.status = {
                             status: 'error',
-                            message: error.response?.data?.detail || 'アップロードに失敗しました'
+                            message: isTimeout
+                                ? 'アップロードがタイムアウトまたは中断されました。ネットワーク状況を確認し再試行してください。'
+                                : error.response?.data?.detail || 'アップロードに失敗しました'
                         };
                         this.isProcessing = false;
                     }
