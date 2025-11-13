@@ -89,6 +89,13 @@
                     </button>
                 </div>
             </div>
+
+            <div v-if="logs.length" class="card">
+                <h2 style="margin-bottom: 12px; font-size: 18px; color: #333;">ログ</h2>
+                <div class="log-card">
+                    <div v-for="(entry, index) in logs" :key="index" class="log-entry">{{ entry }}</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -241,13 +248,5 @@
             }
         }).mount('#app');
     </script>
-    <div v-if="logs.length" class="container">
-        <div class="card">
-            <h2 style="margin-bottom: 12px; font-size: 18px; color: #333;">ログ</h2>
-            <div class="log-card">
-                <div v-for="(entry, index) in logs" :key="index" class="log-entry">{{ entry }}</div>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
